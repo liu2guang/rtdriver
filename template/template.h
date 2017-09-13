@@ -1,5 +1,5 @@
 /*
- * @File:   log_app.h 
+ * @File:   template.h 
  * @Author: liuguang 
  * @Date:   2017-09-13 20:55:58 
  * 
@@ -12,8 +12,8 @@
  * 2017-09-13     liuguang     The first version. 
  */ 
 
-#ifndef __LOG_APP_H_
-#define __LOG_APP_H_
+#ifndef __TEMPLATE_H_
+#define __TEMPLATE_H_
 
 #include "rtthread.h"
 

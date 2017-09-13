@@ -1,5 +1,5 @@
 /*
- * @File:   log_app.c 
+ * @File:   template.c 
  * @Author: liuguang 
  * @Date:   2017-09-13 20:55:58 
  * 
@@ -12,7 +12,7 @@
  * 2017-09-13     liuguang     The first version. 
  */ 
  
-#include "log_app.h"
+#include "template.h"
 
 /* Global Variables */
 /* Static Variables */
