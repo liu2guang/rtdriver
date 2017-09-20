@@ -32,6 +32,7 @@ static rt_err_t rtc_ll_init(void)
 
     __HAL_RCC_PWR_CLK_ENABLE();
     HAL_PWR_EnableBkUpAccess();
+    __HAL_RCC_RTC_ENABLE();
 
     RTC_Handler.Instance = RTC;
 
@@ -53,10 +54,12 @@ static rt_err_t rtc_ll_init(void)
         HAL_RTCEx_BKUPWrite(&RTC_Handler, RTC_BKP_DR1, 0x5A5A);
     }
 
-    /* RTC时钟使能 */
-    __HAL_RCC_RTC_ENABLE();
-
     return RT_EOK;
+}
+
+void HAL_RTC_MspInit(RTC_HandleTypeDef* hrtc)
+{
+
 }
 
 /* 获取rtc时间戳 */
@@ -187,4 +190,4 @@ int rt_hw_rtc_init(void)
 
     return RT_EOK;
 }
-INIT_BOARD_EXPORT(rt_hw_rtc_init);
+INIT_DEVICE_EXPORT(rt_hw_rtc_init);
