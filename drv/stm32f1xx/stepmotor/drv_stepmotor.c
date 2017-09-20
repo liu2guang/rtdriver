@@ -17,6 +17,7 @@ static TIM_HandleTypeDef htimx_stepmotor1;
 static speed_ramp_data   srd1 = {RT_STEPMOTOR_MODE_STOP, RT_STEPMOTOR_CLOCKWISE, 0, 0, 0, 0, 0};
 static __IO rt_uint8_t   stepmotor1_motion_status = 0; /* 0:停止, 1:运动 */
 static __IO rt_int32_t   stepmotor1_position      = 0; /* 当前位置 */
+static rt_uint8_t        stepmotor1_init_flag     = 0; /* 0:未初始化, 1:初始化完毕 */
 #endif
 
 /* 电机2相关参数 */
@@ -25,6 +26,7 @@ static TIM_HandleTypeDef htimx_stepmotor2;
 static speed_ramp_data   srd2 = {RT_STEPMOTOR_MODE_STOP, RT_STEPMOTOR_CLOCKWISE, 0, 0, 0, 0, 0};
 static __IO rt_uint8_t   stepmotor2_motion_status = 0; /* 0:停止, 1:运动 */
 static __IO rt_int32_t   stepmotor2_position      = 0; /* 当前位置 */
+static rt_uint8_t        stepmotor2_init_flag     = 0; /* 0:未初始化, 1:初始化完毕 */
 #endif
 
 #ifdef RT_USING_STEPMOTOR1
@@ -192,7 +194,7 @@ static void rt_stepmotor2_timx_init(void)
     TIM_CCxChannelCmd(RT_STEPMOTOR2_TIMx, RT_STEPMOTOR2_TIMx_CHANNEL, TIM_CCx_DISABLE);
 
     /* 配置定时器中断优先级并使能 */
-    HAL_NVIC_SetPriority(RT_STEPMOTOR2_TIMx_IRQn, 1, 0);
+    HAL_NVIC_SetPriority(RT_STEPMOTOR2_TIMx_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(RT_STEPMOTOR2_TIMx_IRQn);
 
     __HAL_TIM_CLEAR_FLAG(&htimx_stepmotor2, RT_STEPMOTOR2_TIMx_FLAG_CCx);
@@ -472,12 +474,8 @@ rt_err_t rt_stepmotor1_move_forever(rt_uint8_t dir, rt_uint32_t accel, rt_uint32
     {
         return rt_stepmotor1_move_relative(-2147483648L, accel, decel, speed);
     }
-    else
-    {
-        return rt_stepmotor1_move_relative(2147483647L, accel, decel, speed);
-    }
-
-    return RT_EOK;
+    
+    return rt_stepmotor1_move_relative(2147483647L, accel, decel, speed);
 }
 
 /* 步进电机永久转动, 需要变速度先停止电机, 再重新调用该函数 */
@@ -487,12 +485,8 @@ rt_err_t rt_stepmotor2_move_forever(rt_uint8_t dir, rt_uint32_t accel, rt_uint32
     {
         return rt_stepmotor2_move_relative(-2147483648L, accel, decel, speed);
     }
-    else
-    {
-        return rt_stepmotor2_move_relative(2147483647L, accel, decel, speed);
-    }
 
-    return RT_EOK;
+    return rt_stepmotor2_move_relative(2147483647L, accel, decel, speed);
 }
 
 /* 0:停止, 1:运动 */
@@ -505,6 +499,18 @@ rt_uint8_t rt_stepmotor1_run_status(void)
 rt_uint8_t rt_stepmotor2_run_status(void)
 {
     return stepmotor2_motion_status;
+}
+
+/* 0:未初始化, 1:初始化完毕 */
+rt_uint8_t rt_stepmotor1_init_status(void)
+{
+    return stepmotor1_init_flag;
+}
+
+/* 0:未初始化, 1:初始化完毕 */
+rt_uint8_t rt_stepmotor2_init_status(void)
+{
+    return stepmotor2_init_flag;
 }
 
 /* 获取当前电机1位置 */
@@ -541,7 +547,7 @@ rt_err_t rt_stepmotor_drag_up(rt_int32_t step, rt_uint32_t accel, rt_uint32_t de
     /* 将步数转变方向 */
 #if (RT_STEPMOTOR_DRAG_UP_CLOCKWISE == RT_STEPMOTOR_CLOCKWISE)
     if(step > 0)
-#elif
+#else
     if(step < 0)
 #endif
     {
@@ -565,6 +571,7 @@ rt_err_t rt_stepmotor_drag_up(rt_int32_t step, rt_uint32_t accel, rt_uint32_t de
     
     return RT_EOK;
 }
+FINSH_FUNCTION_EXPORT_ALIAS(rt_stepmotor_drag_up, du, stepmotor drag up);
 
 /* 双电机拖动方式向下, 要求向上时双电机上下面的电机是逆时针 */
 rt_err_t rt_stepmotor_drag_down(rt_int32_t step, rt_uint32_t accel, rt_uint32_t decel, rt_uint32_t speed)
@@ -572,7 +579,7 @@ rt_err_t rt_stepmotor_drag_down(rt_int32_t step, rt_uint32_t accel, rt_uint32_t 
     /* 将步数转变方向 */
 #if (RT_STEPMOTOR_DRAG_UP_CLOCKWISE == RT_STEPMOTOR_CLOCKWISE)
     if(step > 0)
-#elif
+#else
     if(step < 0)
 #endif
     {
@@ -596,6 +603,7 @@ rt_err_t rt_stepmotor_drag_down(rt_int32_t step, rt_uint32_t accel, rt_uint32_t 
     
     return RT_EOK;
 }
+FINSH_FUNCTION_EXPORT_ALIAS(rt_stepmotor_drag_down, dd, stepmotor drag down);
 
 /* 双电机向上拖动, 永久 */
 rt_err_t rt_stepmotor_drag_up_forever(rt_uint32_t accel, rt_uint32_t decel, rt_uint32_t speed)
@@ -975,12 +983,16 @@ int rt_hw_stepmotor_init(void)
 #ifdef RT_USING_STEPMOTOR1
     rt_stepmotor1_gpio_init();
     rt_stepmotor1_timx_init();
+    
+    stepmotor1_init_flag = 1;
 #endif
 
     /* 电机2初始化 */
 #ifdef RT_USING_STEPMOTOR2
     rt_stepmotor2_gpio_init();
     rt_stepmotor2_timx_init();
+    
+    stepmotor2_init_flag = 1;
 #endif
 
     return RT_EOK;

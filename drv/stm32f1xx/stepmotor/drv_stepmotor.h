@@ -166,6 +166,10 @@ rt_err_t rt_stepmotor2_move_forever(rt_uint8_t dir, rt_uint32_t accel, rt_uint32
 rt_uint8_t rt_stepmotor1_run_status(void);
 rt_uint8_t rt_stepmotor2_run_status(void);
 
+/* 0:未初始化, 1:初始化完毕 */
+rt_uint8_t rt_stepmotor1_init_status(void);
+rt_uint8_t rt_stepmotor2_init_status(void);
+
 /* 获取当前电机位置 */
 rt_int32_t rt_stepmotor1_current_pos(void);
 rt_int32_t rt_stepmotor2_current_pos(void);
