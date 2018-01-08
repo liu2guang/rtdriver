@@ -1,89 +1,232 @@
+/*
+ * @File:   drv_pin.c 
+ * @Author: liu2guang 
+ * @Date:   2018-01-05 01:12:56 
+ * 
+ * @LICENSE: MIT License Copyright (c) 2017 liu2guang
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * @Note: 驱动中INDEX代表RTT中芯片引脚编号, PORT代表端口号, PIN代表STM32中引脚号, 
+ *        PINNO代表引脚的编号，例如GPIO_PIN_13 PIN为0x2000(1<<13), PINNO为13.
+ *
+ * Change Logs: 
+ * Date           Author       Notes 
+ * 2018-01-05     liu2guang    第一版本. 
+ * 2018-01-09     liu2guang    优化结构体结构. 
+ */ 
 #include "drv_pin.h"
 
-#if defined(RT_USING_PIN)
+/* STM32 PIN描述结构体 */
+struct stm32_pin
+{
+    rt_uint16_t   pin;              /* 引脚索引, 请按照实际芯片引脚顺序分配, 0为无效 */
+    rt_uint32_t   rcc;              /* 引脚时钟 */
+    GPIO_TypeDef *gpio;             /* 引脚GPIO */
+    rt_uint32_t   gpio_pin;         /* 引脚GPIOPIN */
+}; 
 
-#define __STM32_PIN_DEFAULT {-1, 0, 0, 0}
-#if defined(STM32F0) || defined(STM32F2) 
-#define __RCC_GPIO_CLK_ENABLE(BIT)           \
-do {                                         \
-    __IO uint32_t tmpreg = 0x00U;            \
-    SET_BIT(RCC->AHBENR, BIT);               \
-    tmpreg = READ_BIT(RCC->AHBENR, BIT);     \
-    UNUSED(tmpreg);                          \
+/* STM32 IRQ描述结构体 */
+struct stm32_irq
+{
+    rt_uint16_t           enable;   /* 中断使能 */
+    IRQn_Type             irq_num;  /* 中断编号 */
+    struct rt_pin_irq_hdr irq_info; /* 中断信息: GPIOPIN, 中断触发模式, 回调函数, 回调参数 */
+};
+
+/* 计算数组长度 */
+#define __ARRAY_LEN(array) (sizeof(array)/sizeof(array[0])) 
+    
+#define __STM32_PIN_DEFAULT          {0, 0, 0, 0} 
+#define __PIN(INDEX, RCC, PORT, PIN) {INDEX, RCC##PORT##EN, GPIO##PORT, GPIO_PIN_##PIN} 
+#define __GPIO_CLK_ENABLE(RCC, BIT)  \
+do {                                 \
+    __IO uint32_t tmpreg = 0x00U;    \
+    SET_BIT(RCC, BIT);               \
+    tmpreg = READ_BIT(RCC, BIT);     \
+    UNUSED(tmpreg);                  \
 }while(0)
-#define __STM32_PIN(index, gpio, gpio_index) \
-    {index, RCC_AHBENR_GPIOP##gpio##EN, GPIO##gpio, GPIO_PIN_##gpio_index}
-#endif /* STM32F0 and STM32F2 */ 
+
+#if defined(STM32F0) || defined(STM32F3) || defined(STM32L1)
+#define __STM32_GPIO_CLK_ENABLE(BIT)  __GPIO_CLK_ENABLE(RCC->AHBENR, BIT)
+#define __STM32_PIN(INDEX, PORT, PIN) __PIN(INDEX, RCC_AHB2ENR_GPIO, PORT, PIN)
+#endif /* STM32F0 STM32F3 STM32L1 */ 
 
 #if defined(STM32F1)
-#define __RCC_GPIO_CLK_ENABLE(BIT)           \
-do {                                         \
-    __IO uint32_t tmpreg = 0x00U;            \
-    SET_BIT(RCC->APB2ENR, BIT);              \
-    tmpreg = READ_BIT(RCC->APB2ENR, BIT);    \
-    UNUSED(tmpreg);                          \
-}while(0)
-#define __STM32_PIN(index, gpio, gpio_index) \
-    {index, RCC_APB2ENR_IOP##gpio##EN, GPIO##gpio, GPIO_PIN_##gpio_index}
+#define __STM32_GPIO_CLK_ENABLE(BIT)  __GPIO_CLK_ENABLE(RCC->APB2ENR, BIT)
+#define __STM32_PIN(INDEX, PORT, PIN) __PIN(INDEX, RCC_APB2ENR_IOP, PORT, PIN)
 #endif /* STM32F1 */ 
 
 #if defined(STM32F2) || defined(STM32F4) || defined(STM32F7)
-#define __RCC_GPIO_CLK_ENABLE(BIT)           \
-do {                                         \
-    __IO uint32_t tmpreg = 0x00U;            \
-    SET_BIT(RCC->AHB1ENR, BIT);              \
-    tmpreg = READ_BIT(RCC->AHB1ENR, BIT);    \
-    UNUSED(tmpreg);                          \
-}while(0)
-#define __STM32_PIN(index, gpio, gpio_index) \
-    {index, RCC_AHB1ENR_GPIO##gpio##EN, GPIO##gpio, GPIO_PIN_##gpio_index}
-#endif /* STM32F2 and STM32F4 and STM32F7 */ 
-    
-/* STM32F0 F1 F2 F3 F4 F7 GPIO MAP MARCO */
-#if defined(STM32F1)
-static const struct pin_map pins[] = 
-{
-#if (STM32FX_PIN_NUMBERS == 36)
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN(7,  A, 0),
-    __STM32_PIN(8,  A, 1),
-    __STM32_PIN(9,  A, 2),
-    __STM32_PIN(10, A, 3),
-    __STM32_PIN(11, A, 4),
-    __STM32_PIN(12, A, 5),
-    __STM32_PIN(13, A, 6),
-    __STM32_PIN(14, A, 7),
-    __STM32_PIN(15, B, 0),
-    __STM32_PIN(16, B, 1),
-    __STM32_PIN(17, B, 2),
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN(20, A, 8),
-    __STM32_PIN(21, A, 9),
-    __STM32_PIN(22, A, 10),
-    __STM32_PIN(23, A, 11),
-    __STM32_PIN(24, A, 12),
-    __STM32_PIN(25, A, 13),
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN(28, A, 14),
-    __STM32_PIN(29, A, 15),
-    __STM32_PIN(30, B, 3),
-    __STM32_PIN(31, B, 4),
-    __STM32_PIN(32, B, 5),
-    __STM32_PIN(33, B, 6),
-    __STM32_PIN(34, B, 7),
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT
-#endif /* STM32FX_PIN_NUMBERS = 36 */
+#define __STM32_GPIO_CLK_ENABLE(BIT)  __GPIO_CLK_ENABLE(RCC->AHB1ENR, BIT)
+#define __STM32_PIN(INDEX, PORT, PIN) __PIN(INDEX, RCC_AHB1ENR_GPIO, PORT, PIN)
+#endif /* STM32F2 STM32F4 STM32F7 */ 
 
-#if (STM32FX_PIN_NUMBERS == 48)
+#if defined(STM32L0)
+#define __STM32_GPIO_CLK_ENABLE(BIT)  __GPIO_CLK_ENABLE(RCC->IOPENR, BIT)
+#define __STM32_PIN(INDEX, PORT, PIN) __PIN(INDEX, RCC_IOPENR_GPIO, PORT, PIN)
+#endif /* STM32L0 */ 
+
+#if defined(STM32L4)
+#define __STM32_GPIO_CLK_ENABLE(BIT)  __GPIO_CLK_ENABLE(RCC->AHB2ENR, BIT)
+#define __STM32_PIN(INDEX, PORT, PIN) __PIN(INDEX, RCC_AHB2ENR_GPIO, PORT, pin)
+#endif /* STM32L4 */ 
+
+/* PIN表 */
+static struct stm32_pin stm32_pin_map[] = 
+{
+#if defined(STM32FX_PACKAGE_EWLCSP49)   /* OK */
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,                /* VDD_USB */
+    __STM32_PIN(2, A, 15),
+    __STM32_PIN(3, B, 3),
+    __STM32_PIN(4, B, 5),
+    __STM32_PIN_DEFAULT,                /* BOOT0 */
+    __STM32_PIN(6, B, 9),
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN(8, A, 12),
+    __STM32_PIN(9, A, 14),
+    __STM32_PIN(10, B, 4),
+    __STM32_PIN(11, B, 6),
+    __STM32_PIN(12, B, 8),
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN(14, C, 13),
+    __STM32_PIN(15, A, 10),
+    __STM32_PIN(16, A, 13),
+    __STM32_PIN(17, B, 7),
+    __STM32_PIN(18, C, 1),
+    __STM32_PIN(19, C, 0),
+    __STM32_PIN(20, C, 14),             /* OSC32_IN */
+    __STM32_PIN(21, C, 15),             /* OSC32_OUT */
+    __STM32_PIN(22, A, 8),
+    __STM32_PIN(23, A, 11),
+    __STM32_PIN(24, B, 1),
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* NRST */
+    __STM32_PIN(27, H, 0),              /* OSC_IN */
+    __STM32_PIN(28, H, 1),              /* OSC_OUT */
+    __STM32_PIN(29, B, 15),
+    __STM32_PIN(30, A, 9),
+    __STM32_PIN(31, B, 2),
+    __STM32_PIN(32, A, 1),
+    __STM32_PIN(33, A, 0),
+    __STM32_PIN_DEFAULT,                /* VREF+ */
+    __STM32_PIN(35, C, 2),
+    __STM32_PIN(36, B, 14),
+    __STM32_PIN(37, B, 13),
+    __STM32_PIN(38, B, 11),
+    __STM32_PIN(39, A, 7),
+    __STM32_PIN(40, A, 4),
+    __STM32_PIN(41, A, 2),
+    __STM32_PIN_DEFAULT,                /* VDDA */
+    __STM32_PIN(43, B, 12),
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN(45, B, 10),
+    __STM32_PIN(46, B, 0),
+    __STM32_PIN(47, A, 6),
+    __STM32_PIN(48, A, 5),
+    __STM32_PIN(49, A, 3)
+#endif /* STM32FX_PACKAGE_EWLCSP49 */
+
+#if defined(STM32FX_PACKAGE_EWLCSP66)   /* OK */
+    __STM32_PIN_DEFAULT,                /* None */
+    __STM32_PIN(1, A, 14),
+    __STM32_PIN(2, A, 15),
+    __STM32_PIN(3, C, 12),
+    __STM32_PIN(4, B, 3),
+    __STM32_PIN(5, B, 5),
+    __STM32_PIN(6, B, 7),
+    __STM32_PIN(7, B, 9),
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN_DEFAULT,                /* VBAT */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN(11, A, 13),
+    __STM32_PIN(12, C, 10),
+    __STM32_PIN(13, B, 4),
+    __STM32_PIN(14, B, 6),
+    __STM32_PIN_DEFAULT,                /* BOOT0 */
+    __STM32_PIN(16, B, 8),
+    __STM32_PIN(17, C, 13),
+    __STM32_PIN(18, C, 14),             /* OSC32_IN */
+    __STM32_PIN(19, A, 12),
+    __STM32_PIN_DEFAULT,                /* VCAP_2 */
+    __STM32_PIN(21, C, 11),
+    __STM32_PIN(22, D, 2),
+    __STM32_PIN_DEFAULT,                /* IRROFF */
+    __STM32_PIN(24, C, 15),             /* OSC32_OUT */
+    __STM32_PIN(25, C, 9),
+    __STM32_PIN(26, A, 11),
+    __STM32_PIN(27, A, 10),
+    __STM32_PIN(28, C, 2),
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN(32, A, 8),
+    __STM32_PIN(33, A, 9),
+    __STM32_PIN(34, A, 0),
+    __STM32_PIN_DEFAULT,                /* NRST */
+    __STM32_PIN(36, H, 0),              /* OSC_IN */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN(38, C, 7),
+    __STM32_PIN(39, C, 8),
+    __STM32_PIN_DEFAULT,                /* VREF+ */
+    __STM32_PIN(41, C, 1),
+    __STM32_PIN(42, H, 1),              /* OSC_OUT */
+    __STM32_PIN(43, B, 15),
+    __STM32_PIN(44, C, 6),
+    __STM32_PIN(45, C, 5),
+    __STM32_PIN(46, A, 3),
+    __STM32_PIN(47, C, 3),
+    __STM32_PIN(48, C, 0),
+    __STM32_PIN(49, B, 14),
+    __STM32_PIN(50, B, 13),
+    __STM32_PIN(51, B, 10),
+    __STM32_PIN(52, C, 4),
+    __STM32_PIN(53, A, 6),
+    __STM32_PIN(54, A, 5),
+    __STM32_PIN_DEFAULT,                /* REGOFF */
+    __STM32_PIN(56, A, 1),
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN(58, B, 12),
+    __STM32_PIN(59, B, 11),
+    __STM32_PIN_DEFAULT,                /* VCAP_1 */
+    __STM32_PIN(61, B, 2),
+    __STM32_PIN(62, B, 1),
+    __STM32_PIN(63, B, 0),
+    __STM32_PIN(64, A, 7),
+    __STM32_PIN(65, A, 4),
+    __STM32_PIN(66, A, 2)
+#endif /* STM32FX_PACKAGE_EWLCSP66 */
+
+#if defined(STM32FX_PACKAGE_LFBGA100)
+    #error "STM32FX_PACKAGE_LFBGA100 Unrealized." 
+#endif /* STM32FX_PACKAGE_LFBGA100 */
+
+#if defined(STM32FX_PACKAGE_LFBGA144)
+    #error "STM32FX_PACKAGE_LFBGA144 Unrealized." 
+#endif /* STM32FX_PACKAGE_LFBGA144 */
+
+#if defined(STM32FX_PACKAGE_LQFP32)
+    #error "STM32FX_PACKAGE_LQFP32 Unrealized." 
+#endif /* STM32FX_PACKAGE_LQFP32 */
+
+#if defined(STM32FX_PACKAGE_LQFP48)     /* OK */
     __STM32_PIN_DEFAULT,
     __STM32_PIN_DEFAULT,
     __STM32_PIN(2, C, 13),
@@ -133,28 +276,29 @@ static const struct pin_map pins[] =
     __STM32_PIN(46, B, 9),
     __STM32_PIN_DEFAULT,
     __STM32_PIN_DEFAULT
-#endif /* STM32FX_PIN_NUMBERS = 48 */
-#if (STM32FX_PIN_NUMBERS == 64)
-    __STM32_PIN_DEFAULT,        /* ?? */
-    __STM32_PIN_DEFAULT,        /* VBAT */
-    __STM32_PIN(2, C, 13),
-    __STM32_PIN_DEFAULT,        /* OSC32_IN */
-    __STM32_PIN_DEFAULT,        /* OSC32_OUT */
-    __STM32_PIN_DEFAULT,        /* OSC_IN */
-    __STM32_PIN_DEFAULT,        /* OSC_OUT */
-    __STM32_PIN_DEFAULT,        /* NRST */
-    __STM32_PIN(8, C, 0),
-    __STM32_PIN(9, C, 1),
-    __STM32_PIN(10, C, 2),
-    __STM32_PIN(11, C, 3),
-    __STM32_PIN_DEFAULT,        /* VSSA */
-    __STM32_PIN_DEFAULT,        /* VDDA */
+#endif /* STM32FX_PACKAGE_LQFP48 */
+
+#if defined(STM32FX_PACKAGE_LQFP64)     /* OK */
+    __STM32_PIN_DEFAULT, 
+    __STM32_PIN_DEFAULT,                /* VBAT */
+    __STM32_PIN(2, C, 13), 
+    __STM32_PIN(3, C, 14),
+    __STM32_PIN(4, C, 15),
+    __STM32_PIN(5, D, 0),               /* OSC_IN */
+    __STM32_PIN(6, D, 1),               /* OSC_OUT */
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN(8, C, 0), 
+    __STM32_PIN(9, C, 1), 
+    __STM32_PIN(10, C, 2), 
+    __STM32_PIN(11, C, 3), 
+    __STM32_PIN_DEFAULT,                /* VSSA */
+    __STM32_PIN_DEFAULT,                /* VDDA */
     __STM32_PIN(14, A, 0),
     __STM32_PIN(15, A, 1),
     __STM32_PIN(16, A, 2),
     __STM32_PIN(17, A, 3),
-    __STM32_PIN_DEFAULT,        /* VSS */
-    __STM32_PIN_DEFAULT,        /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSSA */
+    __STM32_PIN_DEFAULT,                /* VDDA */
     __STM32_PIN(20, A, 4),
     __STM32_PIN(21, A, 5),
     __STM32_PIN(22, A, 6),
@@ -166,8 +310,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(28, B, 2),
     __STM32_PIN(29, B, 10),
     __STM32_PIN(30, B, 11),
-    __STM32_PIN_DEFAULT,        /* VSS */
-    __STM32_PIN_DEFAULT,        /* VDD */
+    __STM32_PIN_DEFAULT,                /* VCAP_1 */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(33, B, 12),
     __STM32_PIN(34, B, 13),
     __STM32_PIN(35, B, 14),
@@ -182,8 +326,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(44, A, 11),
     __STM32_PIN(45, A, 12),
     __STM32_PIN(46, A, 13),
-    __STM32_PIN_DEFAULT,        /* VSS */
-    __STM32_PIN_DEFAULT,        /* VDD */
+    __STM32_PIN_DEFAULT,                /* VCAP_2 */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(49, A, 14),
     __STM32_PIN(50, A, 15),
     __STM32_PIN(51, C, 10),
@@ -195,42 +339,43 @@ static const struct pin_map pins[] =
     __STM32_PIN(57, B, 5),
     __STM32_PIN(58, B, 6),
     __STM32_PIN(59, B, 7),
-    __STM32_PIN_DEFAULT,        /* BOOT0 */
+    __STM32_PIN_DEFAULT,                /* BOOT0 */
     __STM32_PIN(61, B, 8),
     __STM32_PIN(62, B, 9),
-    __STM32_PIN_DEFAULT,        /* VSS */
-    __STM32_PIN_DEFAULT         /* VDD */
-#endif /* STM32FX_PIN_NUMBERS == 64 */
-#if (STM32FX_PIN_NUMBERS == 100)
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT                 /* VDD */
+#endif /* STM32FX_PACKAGE_LQFP64 */
+
+#if defined(STM32FX_PACKAGE_LQFP100)    /* OK */
     __STM32_PIN_DEFAULT,
     __STM32_PIN(1,  E, 2),
     __STM32_PIN(2,  E, 3),
     __STM32_PIN(3,  E, 4),
     __STM32_PIN(4,  E, 5),
     __STM32_PIN(5,  E, 6),
-    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,                /* VBAT */
     __STM32_PIN(7,  C, 13),
     __STM32_PIN(8,  C, 14),
     __STM32_PIN(9,  C, 15),
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN(12, H, 0),              /* OSC_IN */
+    __STM32_PIN(13, H, 1),              /* OSC_OUT */
+    __STM32_PIN_DEFAULT,                /* NRST */
     __STM32_PIN(15, C, 0),
     __STM32_PIN(16, C, 1),
     __STM32_PIN(17, C, 2),
     __STM32_PIN(18, C, 3),
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSSA */
+    __STM32_PIN_DEFAULT,                /* VREF+ */
+    __STM32_PIN_DEFAULT,                /* VDDA */
     __STM32_PIN(23, A, 0),
     __STM32_PIN(24, A, 1),
     __STM32_PIN(25, A, 2),
     __STM32_PIN(26, A, 3),
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(29, A, 4),
     __STM32_PIN(30, A, 5),
     __STM32_PIN(31, A, 6),
@@ -251,8 +396,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(46, E, 15),
     __STM32_PIN(47, B, 10),
     __STM32_PIN(48, B, 11),
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,                /* VCAP_1 */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(51, B, 12),
     __STM32_PIN(52, B, 13),
     __STM32_PIN(53, B, 14),
@@ -275,9 +420,9 @@ static const struct pin_map pins[] =
     __STM32_PIN(70, A, 11),
     __STM32_PIN(71, A, 12),
     __STM32_PIN(72, A, 13),
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,                /* VCAP_2 */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(76, A, 14),
     __STM32_PIN(77, A, 15),
     __STM32_PIN(78, C, 10),
@@ -296,15 +441,16 @@ static const struct pin_map pins[] =
     __STM32_PIN(91, B, 5),
     __STM32_PIN(92, B, 6),
     __STM32_PIN(93, B, 7),
-    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,                /* BOOT0 */
     __STM32_PIN(95, B, 8),
     __STM32_PIN(96, B, 9),
     __STM32_PIN(97, E, 0),
     __STM32_PIN(98, E, 1),
-    __STM32_PIN_DEFAULT,
-    __STM32_PIN_DEFAULT
-#endif /* STM32FX_PIN_NUMBERS == 100 */
-#if (STM32FX_PIN_NUMBERS == 144)
+    __STM32_PIN_DEFAULT,                /* RFU */
+    __STM32_PIN_DEFAULT                 /* VDD */
+#endif /* STM32FX_PACKAGE_LQFP100 */
+
+#if defined(STM32FX_PACKAGE_LQFP144)    /* OK */
     __STM32_PIN_DEFAULT,
     __STM32_PIN(1, E, 2),
     __STM32_PIN(2, E, 3),
@@ -315,7 +461,6 @@ static const struct pin_map pins[] =
     __STM32_PIN(7, C, 13),
     __STM32_PIN(8, C, 14),
     __STM32_PIN(9, C, 15),
-
     __STM32_PIN(10, F, 0),
     __STM32_PIN(11, F, 1),
     __STM32_PIN(12, F, 2),
@@ -451,30 +596,29 @@ static const struct pin_map pins[] =
     __STM32_PIN(142, E, 1),
     __STM32_PIN_DEFAULT,
     __STM32_PIN_DEFAULT
-#endif /* STM32FX_PIN_NUMBERS == 144 */ 
-};
-#endif /* STM32F1 */
+#endif /* STM32FX_PACKAGE_LQFP144 */
 
-#if defined(STM32F4)
-static const struct pin_map pins[] = 
-{
-#if (STM32FX_PIN_NUMBERS == 208)
-    __STM32_PIN_DEFAULT,    /* NONE */
-    __STM32_PIN(1, E, 2),   /*  */
+#if defined(STM32FX_PACKAGE_LQFP176)
+    #error "STM32FX_PACKAGE_LQFP176 Unrealized." 
+#endif /* STM32FX_PACKAGE_LQFP176 */
+
+#if defined(STM32FX_PACKAGE_LQFP208)    /* OK */
+    __STM32_PIN_DEFAULT,                /* NONE */
+    __STM32_PIN(1, E, 2),               /*  */
     __STM32_PIN(2, E, 3),
     __STM32_PIN(3, E, 4),
     __STM32_PIN(4, E, 5),
     __STM32_PIN(5, E, 6),
-    __STM32_PIN_DEFAULT,    /* VBAT */
+    __STM32_PIN_DEFAULT,                /* VBAT */
     __STM32_PIN(7, I, 8),
     __STM32_PIN(8, C, 13),
-    __STM32_PIN_DEFAULT,    /* OSC32_IN */
-    __STM32_PIN_DEFAULT,    /* OSC32_OUT */
+    __STM32_PIN_DEFAULT,                /* OSC32_IN */
+    __STM32_PIN_DEFAULT,                /* OSC32_OUT */
     __STM32_PIN(11, I, 9),
     __STM32_PIN(12, I, 10),
     __STM32_PIN(13, I, 11),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(15, F, 0),
     __STM32_PIN(16, F, 1),
     __STM32_PIN(17, F, 2),
@@ -484,24 +628,24 @@ static const struct pin_map pins[] =
     __STM32_PIN(22, F, 3),
     __STM32_PIN(23, F, 4),
     __STM32_PIN(24, F, 5),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(27, F, 6),
     __STM32_PIN(28, F, 7),
     __STM32_PIN(29, F, 8),
     __STM32_PIN(30, F, 9),
     __STM32_PIN(31, F, 10),
-    __STM32_PIN_DEFAULT,    /* OSC_IN */
-    __STM32_PIN_DEFAULT,    /* OSC_OUT */
-    __STM32_PIN_DEFAULT,    /* RESET */
+    __STM32_PIN_DEFAULT,                /* OSC_IN */
+    __STM32_PIN_DEFAULT,                /* OSC_OUT */
+    __STM32_PIN_DEFAULT,                /* RESET */
     __STM32_PIN(35, C, 0),
     __STM32_PIN(36, C, 1),
     __STM32_PIN(37, C, 2),
     __STM32_PIN(38, C, 3),
-    __STM32_PIN_DEFAULT,    /* VDD */
-    __STM32_PIN_DEFAULT,    /* VSSA */
-    __STM32_PIN_DEFAULT,    /* VREF+ */
-    __STM32_PIN_DEFAULT,    /* VDDA */
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSSA */
+    __STM32_PIN_DEFAULT,                /* VREF+ */
+    __STM32_PIN_DEFAULT,                /* VDDA */
     __STM32_PIN(43, A, 0),
     __STM32_PIN(44, A, 1),
     __STM32_PIN(45, A, 2),
@@ -510,19 +654,19 @@ static const struct pin_map pins[] =
     __STM32_PIN(48, H, 4),
     __STM32_PIN(49, H, 5),
     __STM32_PIN(50, A, 3),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(53, A, 4),
     __STM32_PIN(54, A, 5),
     __STM32_PIN(55, A, 6),
     __STM32_PIN(56, A, 7),
     __STM32_PIN(57, C, 4),
     __STM32_PIN(58, C, 5),
-    __STM32_PIN_DEFAULT,    /* VDD */
-    __STM32_PIN_DEFAULT,    /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
     __STM32_PIN(61, B, 0),
     __STM32_PIN(62, B, 1),
-    __STM32_PIN_DEFAULT,    /* BOOT1 */
+    __STM32_PIN_DEFAULT,                /* BOOT1 */
     __STM32_PIN(64, I, 15),
     __STM32_PIN(65, J, 0),
     __STM32_PIN(66, J, 1),
@@ -531,8 +675,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(69, J, 4),
     __STM32_PIN(70, F, 11),
     __STM32_PIN(71, F, 12),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(74, F, 13),
     __STM32_PIN(75, F, 14),
     __STM32_PIN(76, F, 15),
@@ -541,8 +685,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(79, E, 7),
     __STM32_PIN(80, E, 8),
     __STM32_PIN(81, E, 9),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(84, E, 10),
     __STM32_PIN(85, E, 11),
     __STM32_PIN(86, E, 12),
@@ -551,9 +695,9 @@ static const struct pin_map pins[] =
     __STM32_PIN(89, E, 15),
     __STM32_PIN(90, B, 10),
     __STM32_PIN(91, B, 11),
-    __STM32_PIN_DEFAULT,    /* VCAP_1 */
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VCAP_1 */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(95, J, 5),
     __STM32_PIN(96, H, 6),
     __STM32_PIN(97, H, 7),
@@ -562,7 +706,7 @@ static const struct pin_map pins[] =
     __STM32_PIN(100, H, 10),
     __STM32_PIN(101, H, 11),
     __STM32_PIN(102, H, 12),
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(104, B, 12),
     __STM32_PIN(105, B, 13),
     __STM32_PIN(106, B, 14),
@@ -573,8 +717,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(111, D, 11),
     __STM32_PIN(112, D, 12),
     __STM32_PIN(113, D, 13),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(116, D, 14),
     __STM32_PIN(117, D, 15),
     __STM32_PIN(118, J, 6),
@@ -583,8 +727,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(121, J, 9),
     __STM32_PIN(122, J, 10),
     __STM32_PIN(123, J, 11),
-    __STM32_PIN_DEFAULT,    /* VDD */
-    __STM32_PIN_DEFAULT,    /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
     __STM32_PIN(126, K, 0),
     __STM32_PIN(127, K, 1),
     __STM32_PIN(128, K, 2),
@@ -595,8 +739,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(133, G, 6),
     __STM32_PIN(134, G, 7),
     __STM32_PIN(135, G, 8),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(138, C, 6),
     __STM32_PIN(139, C, 7),
     __STM32_PIN(140, C, 8),
@@ -607,9 +751,9 @@ static const struct pin_map pins[] =
     __STM32_PIN(145, A, 11),
     __STM32_PIN(146, A, 12),
     __STM32_PIN(147, A, 13),
-    __STM32_PIN_DEFAULT,    /* VCAP_2 */
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VCAP_2 */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(151, H, 13),
     __STM32_PIN(152, H, 14),
     __STM32_PIN(153, H, 15),
@@ -617,7 +761,7 @@ static const struct pin_map pins[] =
     __STM32_PIN(155, I, 1),
     __STM32_PIN(156, I, 2),
     __STM32_PIN(157, I, 3),
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(159, A, 14),
     __STM32_PIN(160, A, 15),
     __STM32_PIN(161, C, 10),
@@ -629,8 +773,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(167, D, 3),
     __STM32_PIN(168, D, 4),
     __STM32_PIN(169, D, 5),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(172, D, 6),
     __STM32_PIN(173, D, 7),
     __STM32_PIN(174, J, 12),
@@ -643,8 +787,8 @@ static const struct pin_map pins[] =
     __STM32_PIN(181, G, 12),
     __STM32_PIN(182, G, 13),
     __STM32_PIN(183, G, 14),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(186, K, 3),
     __STM32_PIN(187, K, 4),
     __STM32_PIN(188, K, 5),
@@ -656,73 +800,276 @@ static const struct pin_map pins[] =
     __STM32_PIN(194, B, 5),
     __STM32_PIN(195, B, 6),
     __STM32_PIN(196, B, 7),
-    __STM32_PIN_DEFAULT,    /* BOOT0 */
+    __STM32_PIN_DEFAULT,                /* BOOT0 */
     __STM32_PIN(198, B, 8),
     __STM32_PIN(199, B, 9),
     __STM32_PIN(200, E, 0),
     __STM32_PIN(201, E, 1),
-    __STM32_PIN_DEFAULT,    /* VSS */
-    __STM32_PIN_DEFAULT,    /* PDR_ON */
-    __STM32_PIN_DEFAULT,    /* VDD */
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* PDR_ON */
+    __STM32_PIN_DEFAULT,                /* VDD */
     __STM32_PIN(205, I, 4),
     __STM32_PIN(206, I, 5),
     __STM32_PIN(207, I, 6),
     __STM32_PIN(208, I, 7)
-#endif
-};
-#endif /* STM32F4 */
+#endif /* STM32FX_PACKAGE_LQFP208 */
 
-#if defined(STM32F0) || defined(STM32F2) || defined(STM32F3) || defined(STM32F7)
-#error need user defined other pin map!
-#endif /* other pin map */
+#if defined(STM32FX_PACKAGE_TFBGA64)
+    #error "STM32FX_PACKAGE_TFBGA64 Unrealized." 
+#endif /* STM32FX_PACKAGE_TFBGA64 */
 
-static const struct pin_irq_map pin_irq_map[] = 
+#if defined(STM32FX_PACKAGE_TFBGA100)
+    #error "STM32FX_PACKAGE_TFBGA100 Unrealized." 
+#endif /* STM32FX_PACKAGE_TFBGA100 */
+
+#if defined(STM32FX_PACKAGE_TFBGA216)
+    #error "STM32FX_PACKAGE_TFBGA216 Unrealized." 
+#endif /* STM32FX_PACKAGE_TFBGA216 */
+
+#if defined(STM32FX_PACKAGE_TFBGA240)
+    #error "STM32FX_PACKAGE_TFBGA240 Unrealized." 
+#endif /* STM32FX_PACKAGE_TFBGA240 */
+
+#if defined(STM32FX_PACKAGE_TSSOP14)
+    #error "STM32FX_PACKAGE_TSSOP14 Unrealized." 
+#endif /* STM32FX_PACKAGE_TSSOP14 */
+
+#if defined(STM32FX_PACKAGE_TSSOP20)    /* OK */
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN(2, F, 0),
+    __STM32_PIN(3, F, 1),
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN(6, A, 0),
+    __STM32_PIN(7, A, 1),
+    __STM32_PIN(8, A, 2),
+    __STM32_PIN(9, A, 3),
+    __STM32_PIN(10, A, 4),
+    __STM32_PIN(11, A, 5),
+    __STM32_PIN(12, A, 6),
+    __STM32_PIN(13, A, 7),
+    __STM32_PIN(14, B, 1),
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN(17, A, 9),
+    __STM32_PIN(18, A, 10),
+    __STM32_PIN(19, A, 13),
+    __STM32_PIN(20, A, 14)
+#endif /* STM32FX_PACKAGE_TSSOP20 */
+
+#if defined(STM32FX_PACKAGE_UFBGA100)
+    #error "STM32FX_PACKAGE_UFBGA100 Unrealized." 
+#endif /* STM32FX_PACKAGE_UFBGA100 */
+
+#if defined(STM32FX_PACKAGE_UFBGA132)
+    #error "STM32FX_PACKAGE_UFBGA132 Unrealized." 
+#endif /* STM32FX_PACKAGE_UFBGA132 */
+
+#if defined(STM32FX_PACKAGE_UFBGA144)
+    #error "STM32FX_PACKAGE_UFBGA144 Unrealized." 
+#endif /* STM32FX_PACKAGE_UFBGA144 */
+
+#if defined(STM32FX_PACKAGE_UFBGA169)
+    #error "STM32FX_PACKAGE_UFBGA169 Unrealized." 
+#endif /* STM32FX_PACKAGE_UFBGA169 */
+
+#if defined(STM32FX_PACKAGE_UFBGA176)
+    #error "STM32FX_PACKAGE_UFBGA176 Unrealized." 
+#endif /* STM32FX_PACKAGE_UFBGA176 */
+
+#if defined(STM32FX_PACKAGE_UFQFPN20)
+    #error "STM32FX_PACKAGE_UFQFPN20 Unrealized." 
+#endif /* STM32FX_PACKAGE_UFQFPN20 */
+
+#if defined(STM32FX_PACKAGE_UFQFPN28)   /* OK */
+    __STM32_PIN_DEFAULT,                /* None */
+    __STM32_PIN_DEFAULT,                /* BOOT0 */
+    __STM32_PIN(2, F, 0),               /* OSC_IN */
+    __STM32_PIN(3, F, 1),               /* OSC_OUT */
+    __STM32_PIN_DEFAULT,                /* NRST */
+    __STM32_PIN_DEFAULT,                /* VDDA */
+    __STM32_PIN(6, A, 0),
+    __STM32_PIN(7, A, 1),
+    __STM32_PIN(8, A, 2),
+    __STM32_PIN(9, A, 3),
+    __STM32_PIN(10, A, 4),
+    __STM32_PIN(11, A, 5),
+    __STM32_PIN(12, A, 6),
+    __STM32_PIN(13, A, 7),
+    __STM32_PIN(14, B, 0),
+    __STM32_PIN(15, B, 1),
+    __STM32_PIN_DEFAULT,                /* VSS */
+    __STM32_PIN_DEFAULT,                /* VDD */
+    __STM32_PIN(18, A, 8),
+    __STM32_PIN(19, A, 9),
+    __STM32_PIN(20, A, 10),
+    __STM32_PIN(21, A, 13),
+    __STM32_PIN(22, A, 14),
+    __STM32_PIN(23, A, 15),
+    __STM32_PIN(24, B, 3),
+    __STM32_PIN(25, B, 4),
+    __STM32_PIN(26, B, 5),
+    __STM32_PIN(27, B, 6),
+    __STM32_PIN(28, B, 7)
+#endif /* STM32FX_PACKAGE_UFQFPN28 */
+
+#if defined(STM32FX_PACKAGE_UFQFPN32)
+    #error "STM32FX_PACKAGE_UFQFPN32 Unrealized." 
+#endif /* STM32FX_PACKAGE_UFQFPN32 */
+
+#if defined(STM32FX_PACKAGE_UFQFPN36)
+    #error "STM32FX_PACKAGE_UFQFPN36 Unrealized." 
+#endif /* STM32FX_PACKAGE_UFQFPN36 */
+
+#if defined(STM32FX_PACKAGE_UFQFPN48)
+    #error "STM32FX_PACKAGE_UFQFPN48 Unrealized." 
+#endif /* STM32FX_PACKAGE_UFQFPN48 */
+
+#if defined(STM32FX_PACKAGE_WLCSP25)    /* OK */
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN(1, A, 13),
+    __STM32_PIN(2, A, 14),
+    __STM32_PIN(3, B, 7),
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN(5, F, 0),
+    __STM32_PIN(6, A, 10),
+    __STM32_PIN(7, B, 6),
+    __STM32_PIN(8, A, 4),
+    __STM32_PIN(9, A, 0),
+    __STM32_PIN(10, F, 1),
+    __STM32_PIN(11, A, 9),
+    __STM32_PIN(12, B, 5),
+    __STM32_PIN(13, A, 5),
+    __STM32_PIN(14, A, 1),
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN(17, A, 8),
+    __STM32_PIN(18, A, 6),
+    __STM32_PIN(19, A, 2),
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN_DEFAULT,
+    __STM32_PIN(22, B, 1),
+    __STM32_PIN(23, B, 0),
+    __STM32_PIN(24, A, 7),
+    __STM32_PIN(25, A, 3)
+#endif /* STM32FX_PACKAGE_WLCSP25 */
+
+#if defined(STM32FX_PACKAGE_WLCSP36)
+    #error "STM32FX_PACKAGE_WLCSP36 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP36 */
+
+#if defined(STM32FX_PACKAGE_WLCSP49)
+    #error "STM32FX_PACKAGE_WLCSP49 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP49 */
+
+#if defined(STM32FX_PACKAGE_WLCSP63)
+    #error "STM32FX_PACKAGE_WLCSP63 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP63 */
+
+#if defined(STM32FX_PACKAGE_WLCSP64)
+    #error "STM32FX_PACKAGE_WLCSP64 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP64 */
+
+#if defined(STM32FX_PACKAGE_WLCSP66)
+    #error "STM32FX_PACKAGE_WLCSP66 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP66 */
+
+#if defined(STM32FX_PACKAGE_WLCSP72)
+    #error "STM32FX_PACKAGE_WLCSP72 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP72 */
+
+#if defined(STM32FX_PACKAGE_WLCSP81)
+    #error "STM32FX_PACKAGE_WLCSP81 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP81 */
+
+#if defined(STM32FX_PACKAGE_WLCSP90)
+    #error "STM32FX_PACKAGE_WLCSP90 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP90 */
+
+#if defined(STM32FX_PACKAGE_WLCSP104)
+    #error "STM32FX_PACKAGE_WLCSP104 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP104 */
+
+#if defined(STM32FX_PACKAGE_WLCSP143)
+    #error "STM32FX_PACKAGE_WLCSP143 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP143 */
+
+#if defined(STM32FX_PACKAGE_WLCSP144)
+    #error "STM32FX_PACKAGE_WLCSP144 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP144 */
+
+#if defined(STM32FX_PACKAGE_WLCSP168)
+    #error "STM32FX_PACKAGE_WLCSP168 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP168 */
+
+#if defined(STM32FX_PACKAGE_WLCSP180)
+    #error "STM32FX_PACKAGE_WLCSP180 Unrealized." 
+#endif /* STM32FX_PACKAGE_WLCSP180 */
+}; 
+
+/* IRQ表 */
+static struct stm32_irq stm32_irq_map[] = 
 {
-    {GPIO_PIN_0,  EXTI0_IRQn    },
-    {GPIO_PIN_1,  EXTI1_IRQn    },
-    {GPIO_PIN_2,  EXTI2_IRQn    },
-    {GPIO_PIN_3,  EXTI3_IRQn    },
-    {GPIO_PIN_4,  EXTI4_IRQn    },
-    {GPIO_PIN_5,  EXTI9_5_IRQn  },
-    {GPIO_PIN_6,  EXTI9_5_IRQn  },
-    {GPIO_PIN_7,  EXTI9_5_IRQn  },
-    {GPIO_PIN_8,  EXTI9_5_IRQn  },
-    {GPIO_PIN_9,  EXTI9_5_IRQn  },
-    {GPIO_PIN_10, EXTI15_10_IRQn},
-    {GPIO_PIN_11, EXTI15_10_IRQn},
-    {GPIO_PIN_12, EXTI15_10_IRQn},
-    {GPIO_PIN_13, EXTI15_10_IRQn},
-    {GPIO_PIN_14, EXTI15_10_IRQn},
-    {GPIO_PIN_15, EXTI15_10_IRQn}
+    {PIN_IRQ_DISABLE, EXTI0_IRQn,     {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI1_IRQn,     {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI2_IRQn,     {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI3_IRQn,     {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI4_IRQn,     {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI9_5_IRQn,   {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI9_5_IRQn,   {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI9_5_IRQn,   {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI9_5_IRQn,   {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI9_5_IRQn,   {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI15_10_IRQn, {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI15_10_IRQn, {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI15_10_IRQn, {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI15_10_IRQn, {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI15_10_IRQn, {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}, 
+    {PIN_IRQ_DISABLE, EXTI15_10_IRQn, {PIN_IRQ_PIN_NONE, PIN_IRQ_MODE_RISING, RT_NULL, RT_NULL}}
 };
 
-static struct rt_pin_irq_hdr pin_irq_hdr_tab[] = 
+/* 内部函数 */
+/* 通过PIN引脚索引获取PIN描述结构体 */
+static struct stm32_pin* get_pinmap_from_pin(rt_uint16_t pin)
 {
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL},
-    {-1, 0, RT_NULL, RT_NULL}
-};
+    if(pin >= __ARRAY_LEN(stm32_pin_map) || pin == 0)
+    {
+        return RT_NULL;
+    }
+    
+    if(stm32_pin_map[pin].pin == 0)
+    {
+        return RT_NULL;
+    }
+    
+    return &stm32_pin_map[pin];
+}
 
+/* 通过GPIO PIN获取IRQ描述结构体 */
+static struct stm32_irq* get_irqmap_from_pin(rt_uint16_t pin)
+{
+    rt_uint32_t index;
+    struct stm32_pin *pin_map = RT_NULL;
+    
+    pin_map = get_pinmap_from_pin(pin);
+    if(pin_map == RT_NULL)
+    {
+        return RT_NULL;
+    }
+    
+    for(index = 0; index < 32; index++)
+    {
+        if((0x01 << index) == pin_map->gpio_pin)
+        {
+            return &stm32_irq_map[index];
+        }
+    }
+    
+    return RT_NULL;
+}
 
-static const struct pin_map *get_pin_map(uint16_t pin_index);
-static const struct pin_irq_map *get_pin_irq_map(uint32_t pinbit);
-static rt_int32_t bit2bitno(rt_uint32_t bit);
-static void pin_irq_hdr(int irqno);
-
-/* STM32外部中断服务函数入口 */
+/* 中断相关 */
 void EXTI0_IRQHandler(void)
 {
     rt_interrupt_enter();
@@ -777,109 +1124,66 @@ void EXTI15_10_IRQHandler(void)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    pin_irq_hdr(bit2bitno(GPIO_Pin));
-}
-
-/* 通过pin编号获取对应pin_map结构体 */
-static const struct pin_map *get_pin_map(uint16_t pin_index)
-{
-    const struct pin_map *p = RT_NULL;
-    
-    if(pin_index < GET_ARRAY_LENGTH(pins))
-    {
-        p = &pins[pin_index];
-        if(p->index == (-1))
-        {
-            p = RT_NULL;
-        }
-    }
-    
-    return p;
-}
-
-/* 通过pin获取对应pin_irq_map结构体 */
-static const struct pin_irq_map *get_pin_irq_map(uint32_t pin_bit)
-{
-    rt_int32_t map_index = bit2bitno(pin_bit);
-    
-    if(map_index < 0 || map_index >= GET_ARRAY_LENGTH(pin_irq_map))
-    {
-        return RT_NULL;
-    }
-    
-    return &pin_irq_map[map_index];
-}
-
-/* 通过pin获取pin编号 */
-static rt_int32_t bit2bitno(rt_uint32_t bit)
-{
     rt_uint32_t index;
     
     for(index = 0; index < 32; index++)
     {
-        if((0x01 << index) == bit)
+        if((0x01 << index) == GPIO_Pin)
         {
-            return index;
+            break;
         }
     }
     
-    return (-1);
-}
-
-static void pin_irq_hdr(int irqno)
-{
-    if(pin_irq_hdr_tab[irqno].hdr)
+    if(stm32_irq_map[index].irq_info.hdr != RT_NULL)
     {
-        pin_irq_hdr_tab[irqno].hdr(pin_irq_hdr_tab[irqno].args);
+        stm32_irq_map[index].irq_info.hdr(stm32_irq_map[index].irq_info.args);
     }
 }
 
-/* write pin level */
-static void stm32_pin_write(rt_device_t dev, rt_base_t pin, rt_base_t value)
-{
-    const struct pin_map *p = RT_NULL;
-    
-    p =  get_pin_map(pin);
-    if(p == RT_NULL)
-    {
-        return;
-    }
-    
-    HAL_GPIO_WritePin(p->port, p->pin, (GPIO_PinState)value);
-}
-
-/* read pin level */
+/* PIN读取状态 */ 
 static int stm32_pin_read(rt_device_t dev, rt_base_t pin)
 {
-    const struct pin_map *p = RT_NULL;
+    struct stm32_pin *pin_map = RT_NULL;
     
-    p = get_pin_map(pin);
-    if(p == RT_NULL)
+    pin_map = get_pinmap_from_pin(pin); 
+    if(pin_map == RT_NULL)
     {
         return (-RT_ENOSYS);
     }
     
-    return HAL_GPIO_ReadPin(p->port, p->pin);
+    return HAL_GPIO_ReadPin(pin_map->gpio, pin_map->gpio_pin); 
 }
 
-/* config pin mode */
+/* PIN写状态 */
+static void stm32_pin_write(rt_device_t dev, rt_base_t pin, rt_base_t value)
+{
+    struct stm32_pin *pin_map = RT_NULL;
+    
+    pin_map = get_pinmap_from_pin(pin); 
+    if(pin_map == RT_NULL)
+    {
+        return; 
+    }
+    
+    HAL_GPIO_WritePin(pin_map->gpio, pin_map->gpio_pin, (GPIO_PinState)value); 
+} 
+
+/* PIN通用输入输出模式配置 */ 
 static void stm32_pin_mode(rt_device_t dev, rt_base_t pin, rt_base_t mode)
 {
-    const struct pin_map *p = RT_NULL;
     GPIO_InitTypeDef  gpio;
+    struct stm32_pin* pin_map = RT_NULL;
     
-    p =  get_pin_map(pin);
-    if(p == RT_NULL)
+    pin_map = get_pinmap_from_pin(pin);
+    if(pin_map == RT_NULL)
     {
         return;
     }
     
-    /* ENABLE CLK ENABLE */
-    __RCC_GPIO_CLK_ENABLE(p->clk);
+    __STM32_GPIO_CLK_ENABLE(pin_map->rcc);
     
-    /* Configure GPIO */
-    gpio.Pin   = p->pin;
-    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Pin   = pin_map->gpio_pin; 
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH; 
     
     switch(mode)
     {
@@ -919,125 +1223,96 @@ static void stm32_pin_mode(rt_device_t dev, rt_base_t pin, rt_base_t mode)
         break;
     }
     
-    HAL_GPIO_Init(p->port, &gpio);
+    HAL_GPIO_Init(pin_map->gpio, &gpio); 
 }
 
+/* 注册中断 */ 
 rt_err_t stm32_pin_attach_irq(struct rt_device *device, rt_int32_t pin,
     rt_uint32_t mode, void (*hdr)(void *args), void *args)
 {
-    const struct pin_map *p;
-    rt_base_t level;
-    rt_int32_t irq_index = -1;
+    struct stm32_irq* irq_map = RT_NULL; 
     
-    p = get_pin_map(pin);
-    if(p == RT_NULL)
+    irq_map = get_irqmap_from_pin(pin); 
+    if(irq_map == RT_NULL) 
     {
-        return RT_ENOSYS;
+        return RT_ENOSYS; 
     }
     
-    irq_index = bit2bitno(p->pin);
-    if(irq_index < 0 || irq_index >= GET_ARRAY_LENGTH(pin_irq_map))
+    /* 检测是否已经注册 */
+    if(irq_map->enable == PIN_IRQ_ENABLE)
     {
-        return RT_ENOSYS;
+        return RT_EBUSY; 
     }
     
-    level = rt_hw_interrupt_disable();
-    if (pin_irq_hdr_tab[irq_index].pin  == pin  &&
-        pin_irq_hdr_tab[irq_index].hdr  == hdr  &&
-        pin_irq_hdr_tab[irq_index].mode == mode &&
-        pin_irq_hdr_tab[irq_index].args == args)
-    {
-        rt_hw_interrupt_enable(level);
-        return RT_EOK;
-    }
+    irq_map->irq_info.pin  = pin; 
+    irq_map->irq_info.hdr  = hdr; 
+    irq_map->irq_info.mode = mode; 
+    irq_map->irq_info.args = args; 
     
-    if(pin_irq_hdr_tab[irq_index].pin != -1)
-    {
-        rt_hw_interrupt_enable(level);
-        return RT_EBUSY;
-    }
-    
-    pin_irq_hdr_tab[irq_index].pin  = pin;
-    pin_irq_hdr_tab[irq_index].hdr  = hdr;
-    pin_irq_hdr_tab[irq_index].mode = mode;
-    pin_irq_hdr_tab[irq_index].args = args;
-    rt_hw_interrupt_enable(level);
-
     return RT_EOK;
-}
+} 
 
+/* 注销中断 */
 rt_err_t stm32_pin_dettach_irq(struct rt_device *device, rt_int32_t pin)
 {
-    const struct pin_map *p;
-    rt_base_t level;
-    rt_int32_t irq_index = -1;
-
-    p = get_pin_map(pin);
-    if(p == RT_NULL)
+    struct stm32_irq* irq_map = RT_NULL; 
+    
+    irq_map = get_irqmap_from_pin(pin); 
+    if(irq_map == RT_NULL) 
     {
-        return RT_ENOSYS;
+        return RT_ENOSYS; 
     }
     
-    irq_index = bit2bitno(p->pin);
-    if(irq_index < 0 || irq_index >= GET_ARRAY_LENGTH(pin_irq_map))
+    /* 检测是否已经注册 */
+    if(irq_map->enable == PIN_IRQ_DISABLE)
     {
-        return RT_ENOSYS;
-    }
-
-    level = rt_hw_interrupt_disable();
-    if (pin_irq_hdr_tab[irq_index].pin == -1)
-    {
-        rt_hw_interrupt_enable(level);
-        return RT_EOK;
+        return RT_EOK; 
     }
     
-    pin_irq_hdr_tab[irq_index].pin  = -1;
-    pin_irq_hdr_tab[irq_index].hdr  = RT_NULL;
-    pin_irq_hdr_tab[irq_index].mode = 0;
-    pin_irq_hdr_tab[irq_index].args = RT_NULL;
-    rt_hw_interrupt_enable(level);
-
+    irq_map->irq_info.pin  = PIN_IRQ_PIN_NONE; 
+    irq_map->irq_info.hdr  = RT_NULL; 
+    irq_map->irq_info.mode = PIN_IRQ_MODE_RISING; 
+    irq_map->irq_info.args = RT_NULL; 
+    
     return RT_EOK;
-}
+} 
 
-rt_err_t stm32_pin_irq_enable(struct rt_device *device, rt_base_t pin,
-    rt_uint32_t enabled)
+/* 启动中断 */
+rt_err_t stm32_pin_irq_enable(struct rt_device *device, rt_base_t pin, rt_uint32_t enabled)
 {
-    const struct pin_map *p;
-    const struct pin_irq_map *irq_map;
-    rt_base_t level;
-    rt_int32_t irq_index = -1;
-    GPIO_InitTypeDef gpio;
-
-    p = get_pin_map(pin);
-    if(p == RT_NULL)
+    GPIO_InitTypeDef  gpio; 
+    struct stm32_pin* pin_map = RT_NULL; 
+    struct stm32_irq* irq_map = RT_NULL; 
+    
+    pin_map = get_pinmap_from_pin(pin); 
+    irq_map = get_irqmap_from_pin(pin); 
+    if(pin_map == RT_NULL || irq_map == RT_NULL) 
     {
-        return RT_ENOSYS;
+        return RT_ENOSYS; 
     }
     
     if(enabled == PIN_IRQ_ENABLE)
     {
-        irq_index = bit2bitno(p->pin);
-        if(irq_index < 0 || irq_index >= GET_ARRAY_LENGTH(pin_irq_map))
+        /* 判断中断是否已经使能 */
+        if(irq_map->enable == PIN_IRQ_ENABLE)
         {
-            return RT_ENOSYS;
+            return RT_EBUSY; 
         }
         
-        level = rt_hw_interrupt_disable();
-        if (pin_irq_hdr_tab[irq_index].pin == (-1))
+        /* 判断注册的中断是否是该PIN */
+        if(irq_map->irq_info.pin != pin)
         {
-            rt_hw_interrupt_enable(level);
-            return RT_ENOSYS;
+            return RT_EIO; 
         }
         
-        irq_map = &pin_irq_map[irq_index];
+        irq_map->enable = PIN_IRQ_ENABLE;
         
-        __RCC_GPIO_CLK_ENABLE(p->clk);
+        __STM32_GPIO_CLK_ENABLE(pin_map->rcc);
         
-        gpio.Pin   = p->pin;
-        gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+        gpio.Pin   = pin_map->gpio_pin; 
+        gpio.Speed = GPIO_SPEED_FREQ_HIGH; 
         
-        switch(pin_irq_hdr_tab[irq_index].mode)
+        switch(irq_map->irq_info.mode)
         {
             case PIN_IRQ_MODE_RISING:
             {
@@ -1061,44 +1336,48 @@ rt_err_t stm32_pin_irq_enable(struct rt_device *device, rt_base_t pin,
             break;
         }
         
-        HAL_GPIO_Init(p->port, &gpio);
+        HAL_NVIC_SetPriority(irq_map->irq_num, 5, 0);
+        HAL_NVIC_EnableIRQ  (irq_map->irq_num);
         
-        HAL_NVIC_SetPriority(irq_map->irqno, 5, 0);
-        HAL_NVIC_EnableIRQ(irq_map->irqno);
-        
-        rt_hw_interrupt_enable(level);
+        HAL_GPIO_Init(pin_map->gpio, &gpio);
     }
     else if(enabled == PIN_IRQ_DISABLE)
     {
-        irq_map = get_pin_irq_map(p->pin);
-        if (irq_map == RT_NULL)
+        if(irq_map->enable == PIN_IRQ_DISABLE)
         {
-            return RT_ENOSYS;
+            return RT_EOK; 
         }
-        HAL_NVIC_DisableIRQ(irq_map->irqno);
+        
+        irq_map->enable = PIN_IRQ_DISABLE;
+        
+        HAL_NVIC_DisableIRQ(irq_map->irq_num);
     }
     else
     {
-        return RT_ENOSYS;
+        return RT_EINVAL; 
     }
-
+    
     return RT_EOK;
 }
 
-const static struct rt_pin_ops stm32_pin_ops = 
+/* PIN驱动底层OPS */
+static struct rt_pin_ops stm32_pin_ops = 
 {
-    stm32_pin_mode,
-    stm32_pin_write,
-    stm32_pin_read,
-    stm32_pin_attach_irq,
-    stm32_pin_dettach_irq,
-    stm32_pin_irq_enable
-};
+    .pin_mode        = stm32_pin_mode, 
+    .pin_read        = stm32_pin_read, 
+    .pin_write       = stm32_pin_write, 
+    .pin_attach_irq  = stm32_pin_attach_irq,
+    .pin_dettach_irq = stm32_pin_dettach_irq,
+    .pin_irq_enable  = stm32_pin_irq_enable
+}; 
 
+/* PIN驱动初始化 */
 int rt_hw_pin_init(void)
 {
-    return rt_device_pin_register("pin", &stm32_pin_ops, RT_NULL);
+    int ret = RT_EOK; 
+    
+    ret = rt_device_pin_register("pin", &stm32_pin_ops, RT_NULL);
+    
+    return ret;
 }
-INIT_BOARD_EXPORT(rt_hw_pin_init);
-
-#endif /* RT_USING_PIN */
+INIT_BOARD_EXPORT(rt_hw_pin_init); 
