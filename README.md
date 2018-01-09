@@ -1,2 +1,2 @@
-## RT-Thread 2.1.0 Driver PKG ##
+## RT-Thread 3.0.2 Driver PKG ##
 
