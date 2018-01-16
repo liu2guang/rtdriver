@@ -14,7 +14,7 @@
  * 2017-09-15     liuguang     解决2G以上卡无法识别, 提高SD识别稳定性, 提高热拔插稳定性
  */ 
 
-#include "drv_sdio_sd.h"
+#include "drv_sdcard.h"
 #include "drv_gpio.h"
 #include "drv_led.h"
 #include "multi_button.h"

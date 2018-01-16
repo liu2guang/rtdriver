@@ -1,12 +1,12 @@
-#ifndef __DRV_SDIO_SD_2_H_
-#define __DRV_SDIO_SD_2_H_
+#ifndef __DRV_SDCARD_H_ 
+#define __DRV_SDCARD_H_ 
 
 #include <board.h>
 #include <rtthread.h>
 
 #include "stm32f1xx.h"
 
-#define RT_SDCARD_HOTPLUG_GPIO_INDEX (55)
+#define RT_SDCARD_HOTPLUG_GPIO_INDEX (55) 
 
 #define RT_SDCARD_PULLOUT      ((uint8_t)0x00)
 #define RT_SDCARD_INTERJECT    ((uint8_t)0x01)

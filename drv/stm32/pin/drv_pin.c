@@ -23,15 +23,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  *
- * @Note: 驱动中INDEX代表RTT中芯片引脚编号, PORT代表端口号, PIN代表STM32中引脚号, 
- *        PINNO代表引脚的编号，例如GPIO_PIN_13 PIN为0x2000(1<<13), PINNO为13.
- *
  * Change Logs: 
  * Date           Author       Notes 
  * 2018-01-05     liu2guang    第一版本. 
  * 2018-01-09     liu2guang    优化结构体结构. 
  */ 
 #include "drv_pin.h"
+#include "rtthread.h" 
+#include "rtdevice.h" 
 
 /* STM32 PIN描述结构体 */
 struct stm32_pin

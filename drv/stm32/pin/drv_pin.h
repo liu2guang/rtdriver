@@ -1,9 +1,6 @@
 #ifndef __DRV_PIN_H_ 
 #define __DRV_PIN_H_ 
 
-#include <rthw.h> 
-#include <rtdevice.h> 
-
 #define STM32F1 
 // #define STM32FX_PACKAGE_EWLCSP49 
 // #define STM32FX_PACKAGE_EWLCSP66 
@@ -70,5 +67,7 @@
 #elif 
 #error "The PIN driver does not specify the type of the chip."
 #endif
+
+int rt_hw_pin_init(void); 
 
 #endif /* __DRV_PIN_H_ */ 

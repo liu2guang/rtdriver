@@ -1,279 +1,380 @@
 /*
- * File      : drv_spi.h
+ * File      : dev_spi.c
  * This file is part of RT-Thread RTOS
- * COPYRIGHT (C) 2017 RT-Thread Develop Team
+ * COPYRIGHT (C) 2015, RT-Thread Development Team
  *
  * The license and distribution terms for this file may be
  * found in the file LICENSE in this distribution or at
  * http://www.rt-thread.org/license/LICENSE
  *
  * Change Logs:
- * Date           Author       Notes
- * 2017-08-17     liuguang     first implementation.
+ * Date           Author         Notes
+ * 2017-10-20     ZYH            the first version
+ * 2017-11-35     ZYH            update to 3.0.0
  */
- 
-#include "drv_spi.h"
-
 #include <board.h>
-#include <finsh.h>
+#include <drv_spi.h>
 
-// #define DEBUG
+#ifdef RT_USING_SPI
 
-#ifdef DEBUG
-#define DEBUG_PRINTF(...)   rt_kprintf(__VA_ARGS__)
-#else
-#define DEBUG_PRINTF(...)   
-#endif
+#define SPIRXEVENT 0x01
+#define SPITXEVENT 0x02
+#define SPITIMEOUT 2
+#define SPICRCEN 0
 
-/* private rt-thread spi ops function */
-static rt_err_t configure(struct rt_spi_device* device, struct rt_spi_configuration* configuration);
-static rt_uint32_t xfer(struct rt_spi_device* device, struct rt_spi_message* message);
-
-static struct rt_spi_ops stm32_spi_ops =
+struct stm32_hw_spi_cs
 {
-    configure,
-    xfer
+    rt_uint32_t pin;
 };
 
-static rt_err_t configure(struct rt_spi_device* device,
-                          struct rt_spi_configuration* configuration)
+struct stm32_spi
 {
-	struct rt_spi_bus *spi_bus;
-	struct stm32f1_spi *f1_spi;
-	
-	RT_ASSERT(device != RT_NULL);
-	RT_ASSERT(configuration != RT_NULL);
-	
-	spi_bus = (struct rt_spi_bus *)(device->bus);
-	f1_spi  = (struct stm32f1_spi *)(spi_bus->parent.user_data);
-	
-	SPI_HandleTypeDef *SpiHandle = &f1_spi->spi_handle;
-	
-	/* data_width */
-	if(configuration->data_width <= 8)
-	{
-		SpiHandle->Init.DataSize = SPI_DATASIZE_8BIT;
-	}
-	else if(configuration->data_width <= 16)
-	{
-		SpiHandle->Init.DataSize = SPI_DATASIZE_16BIT;
-	}
-	else
+    SPI_TypeDef *Instance;
+    struct rt_spi_configuration *cfg;
+};
+
+int stm32_spi_register_bus(SPI_TypeDef * SPIx, const char * name);
+
+static rt_err_t stm32_spi_init(SPI_TypeDef *spix, struct rt_spi_configuration *cfg)
+{
+    SPI_HandleTypeDef hspi;
+    hspi.Instance = spix;
+
+    if (cfg->mode & RT_SPI_SLAVE)
+    {
+        hspi.Init.Mode = SPI_MODE_SLAVE;
+    }
+    else
+    {
+        hspi.Init.Mode = SPI_MODE_MASTER;
+    }
+    if (cfg->mode & RT_SPI_3WIRE)
+    {
+        hspi.Init.Direction = SPI_DIRECTION_1LINE;
+    }
+    else
+    {
+        hspi.Init.Direction = SPI_DIRECTION_2LINES;
+    }
+    if (cfg->data_width == 8)
+    {
+        hspi.Init.DataSize = SPI_DATASIZE_8BIT;
+    }
+    else if (cfg->data_width == 16)
+    {
+        hspi.Init.DataSize = SPI_DATASIZE_16BIT;
+    }
+    else
     {
         return RT_EIO;
     }
-	
-	/* baudrate */
-	{
-		uint32_t SPI_APB_CLOCK;
-		uint32_t max_hz;
-		
-		max_hz = configuration->max_hz;
-		
-		/* ½µµÍflashµÄÆµÂÊ */
-		max_hz = 50 * 1000 * 1000UL; /* 10Mbit/s */
-		
-		DEBUG_PRINTF("max_hz = %ld\n", max_hz);
-		
-		DEBUG_PRINTF("sys   freq: %d\n", HAL_RCC_GetSysClockFreq());
-		DEBUG_PRINTF("pclk2 freq: %d\n", HAL_RCC_GetPCLK2Freq());
-		
-		SPI_APB_CLOCK = HAL_RCC_GetPCLK2Freq();
-		
-		if(max_hz >= SPI_APB_CLOCK/4)
-		{
-			SpiHandle->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
-		}
-		else if(max_hz >= SPI_APB_CLOCK/8)
-		{
-			SpiHandle->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
-		}
-		else if(max_hz >= SPI_APB_CLOCK/16)
-		{
-			SpiHandle->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
-		}
-		else if(max_hz >= SPI_APB_CLOCK/32)
-		{
-			SpiHandle->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
-		}
-		else if(max_hz >= SPI_APB_CLOCK/64)
-		{
-			SpiHandle->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64;
-		}
-        else if(max_hz >= SPI_APB_CLOCK/128)
-        {
-            SpiHandle->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
-        }
-        else /* min prescaler 256 */
-        {
-            SpiHandle->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
-        }
-	} /* baudrate */
-	
-	/* CPOL */
-	if(configuration->mode & RT_SPI_CPOL)
-	{
-		SpiHandle->Init.CLKPolarity = SPI_POLARITY_HIGH;
-	}
-	else
-	{
-		SpiHandle->Init.CLKPolarity = SPI_POLARITY_LOW;
-	}
-	
-	/* CPHA */
-	if(configuration->mode & RT_SPI_CPHA)
-	{
-		SpiHandle->Init.CLKPhase = SPI_PHASE_2EDGE;
-	}
-	else
-	{
-		SpiHandle->Init.CLKPhase = SPI_PHASE_1EDGE;
-	}
-	
-	/* MSB or LSB */
-	if(configuration->mode & RT_SPI_MSB)
-	{
-		SpiHandle->Init.FirstBit = SPI_FIRSTBIT_MSB;
-	}
-	else
-	{
-		SpiHandle->Init.FirstBit = SPI_FIRSTBIT_LSB;
-	}
-	
-	SpiHandle->Init.Mode           = SPI_MODE_MASTER;
-	SpiHandle->Init.Direction      = SPI_DIRECTION_2LINES;
-	SpiHandle->Init.NSS            = SPI_NSS_SOFT;
-	SpiHandle->Init.TIMode         = SPI_TIMODE_DISABLE;
-	SpiHandle->Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-	SpiHandle->Init.CRCPolynomial  = 10;
-	
-	/* init SPI */
-	if(HAL_SPI_Init(SpiHandle) != HAL_OK)
-	{
-		return RT_ERROR;
-	}
-	
-	/* Enable SPI_MASTER */
-	__HAL_SPI_ENABLE(SpiHandle);
-	
-	DEBUG_PRINTF("spi configuration\n");
-	
-    return RT_EOK;
-};
-
-static rt_uint32_t xfer(struct rt_spi_device* device, struct rt_spi_message* message)
-{
-	struct rt_spi_bus *stm32_spi_bus = (struct rt_spi_bus *)(device->bus);
-	struct stm32f1_spi *f1_spi = (struct stm32f1_spi *)(stm32_spi_bus->parent.user_data);
-	struct rt_spi_configuration *config = &device->config;
-	SPI_TypeDef *SPI = f1_spi->spi_handle.Instance;
-	struct stm32_spi_cs *stm32_spi_cs = device->parent.user_data;
-	rt_uint32_t size = message->length;
-	
-	RT_ASSERT(device  != NULL);
-	RT_ASSERT(message != NULL);
-	
-	/* take CS */
-	if(message->cs_take)
-	{
-		HAL_GPIO_WritePin(stm32_spi_cs->GPIOx, stm32_spi_cs->GPIO_Pin, GPIO_PIN_RESET);
-	}
-	
-	if(config->data_width <= 8)
-	{
-		const rt_uint8_t *send_ptr = message->send_buf;
-		rt_uint8_t *recv_ptr       = message->recv_buf;
-		
-		while(size--)
-		{
-			rt_uint8_t data = 0xFF;
-			
-			if(send_ptr != RT_NULL)
-			{
-				data = *send_ptr++;
-			}
-			
-			while ((SPI->SR & SPI_FLAG_TXE) == RESET);	
-			SPI->DR = data;
-			
-			while ((SPI->SR & SPI_FLAG_RXNE) == RESET);
-			data = SPI->DR;
-			
-			if(recv_ptr != RT_NULL)
-			{
-				*recv_ptr++ = data;
-			}
-		}
-	}
-	else if(config->data_width <= 16)
-	{
-		const rt_uint16_t *send_ptr = message->send_buf;
-		rt_uint8_t *recv_ptr        = message->recv_buf;
-		
-		while(size--)
-		{
-			rt_uint16_t data = 0xFFFF;
-			
-			if(send_ptr != RT_NULL)
-			{
-				data = *send_ptr++;
-			}
-			
-			while((SPI->SR & SPI_FLAG_TXE) == RESET);
-			SPI->DR = data;
-			
-			while((SPI->SR & SPI_FLAG_RXNE) == RESET);
-			data = SPI->DR;
-			
-			if(recv_ptr != RT_NULL)
-			{
-				*recv_ptr++ = data;
-			}
-		}	
-	}
-	
-	/* release CS */	
-	if(message->cs_release)
-	{
-		HAL_GPIO_WritePin(stm32_spi_cs->GPIOx, stm32_spi_cs->GPIO_Pin, GPIO_PIN_SET);
-	}
-	
-    return message->length;
-};
-
-#ifdef RT_USING_SPI1
-static struct rt_spi_bus spi1_bus;
-static struct stm32f1_spi stm32f1_spi1 = 
-{
-    {SPI1}
-};
-#endif
-
-/*  */
-rt_err_t stm32_spi_bus_register(SPI_TypeDef * SPI, const char * spi_bus_name)
-{
-    struct stm32f1_spi * p_spi_bus;
-    struct rt_spi_bus *  spi_bus;
-    
-    RT_ASSERT(SPI != RT_NULL);
-    RT_ASSERT(spi_bus_name != RT_NULL);
-	
-	if(SPI != SPI1)
-	{
-		return RT_ENOSYS;
-	}
-        
-#ifdef RT_USING_SPI1
-    if(SPI == SPI1)
-    {			
-		__HAL_RCC_SPI1_CLK_ENABLE();
-	
-        spi_bus = &spi1_bus;
-		p_spi_bus = &stm32f1_spi1;
+    if (cfg->mode & RT_SPI_CPHA)
+    {
+        hspi.Init.CLKPhase = SPI_PHASE_2EDGE;
     }
-#endif
-	
-	spi_bus->parent.user_data = p_spi_bus;
-	
-    return rt_spi_bus_register(spi_bus, spi_bus_name, &stm32_spi_ops);
+    else
+    {
+        hspi.Init.CLKPhase = SPI_PHASE_1EDGE;
+    }
+    if (cfg->mode & RT_SPI_CPOL)
+    {
+        hspi.Init.CLKPolarity = SPI_POLARITY_HIGH;
+    }
+    else
+    {
+        hspi.Init.CLKPolarity = SPI_POLARITY_LOW;
+    }
+    if (cfg->mode & RT_SPI_NO_CS)
+    {
+        hspi.Init.NSS = SPI_NSS_SOFT;
+    }
+    else
+    {
+        hspi.Init.NSS = SPI_NSS_SOFT;
+//        hspi.Init.NSS = SPI_NSS_HARD_OUTPUT;
+    }
+    if (cfg->max_hz >= HAL_RCC_GetPCLK2Freq() / 2)
+    {
+        hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+    }
+    else if (cfg->max_hz >= HAL_RCC_GetPCLK2Freq() / 4)
+    {
+        hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
+    }
+    else if (cfg->max_hz >= HAL_RCC_GetPCLK2Freq() / 8)
+    {
+        hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+    }
+    else if (cfg->max_hz >= HAL_RCC_GetPCLK2Freq() / 16)
+    {
+        hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+    }
+    else if (cfg->max_hz >= HAL_RCC_GetPCLK2Freq() / 32)
+    {
+        hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+    }
+    else if (cfg->max_hz >= HAL_RCC_GetPCLK2Freq() / 64)
+    {
+        hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64;
+    }
+    else if (cfg->max_hz >= HAL_RCC_GetPCLK2Freq() / 128)
+    {
+        hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
+    }
+    else
+    {
+        /*  min prescaler 256 */
+        hspi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+    }
+    if (cfg->mode & RT_SPI_MSB)
+    {
+        hspi.Init.FirstBit = SPI_FIRSTBIT_MSB;
+    }
+    else
+    {
+        hspi.Init.FirstBit = SPI_FIRSTBIT_LSB;
+    }
+    hspi.Init.TIMode = SPI_TIMODE_DISABLE;
+    hspi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+    hspi.Init.CRCPolynomial = 7;
+    hspi.State = HAL_SPI_STATE_RESET;
+    if (HAL_SPI_Init(&hspi) != HAL_OK)
+    {
+        return RT_EIO;
+    }
+    __HAL_SPI_ENABLE(&hspi);
+    return RT_EOK;
 }
+#define SPISTEP(datalen) (((datalen) == 8) ? 1 : 2)
+#define SPISEND_1(reg, ptr, datalen)       \
+    do                                     \
+    {                                      \
+        if (datalen == 8)                  \
+        {                                  \
+            (reg) = *(rt_uint8_t *)(ptr);  \
+        }                                  \
+        else                               \
+        {                                  \
+            (reg) = *(rt_uint16_t *)(ptr); \
+        }                                  \
+    } while (0)
+#define SPIRECV_1(reg, ptr, datalen)       \
+    do                                     \
+    {                                      \
+        if (datalen == 8)                  \
+        {                                  \
+            *(rt_uint8_t *)(ptr) = (reg);  \
+        }                                  \
+        else                               \
+        {                                  \
+            *(rt_uint16_t *)(ptr) = reg;   \
+        }                                  \
+    } while (0)
+
+static rt_err_t spitxrx1b(struct stm32_spi *hspi, void *rcvb, const void *sndb)
+{
+    rt_uint32_t padrcv = 0;
+    rt_uint32_t padsnd = 0xFF;
+    if (!rcvb && !sndb)
+    {
+        return RT_ERROR;
+    }
+    if (!rcvb)
+    {
+        rcvb = &padrcv;
+    }
+    if (!sndb)
+    {
+        sndb = &padsnd;
+    }
+    while (__HAL_SPI_GET_FLAG(hspi, SPI_FLAG_TXE) == RESET)
+        ;
+    SPISEND_1(hspi->Instance->DR, sndb, hspi->cfg->data_width);
+    while (__HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE) == RESET)
+        ;
+    SPIRECV_1(hspi->Instance->DR, rcvb, hspi->cfg->data_width);
+    return RT_EOK;
+}
+static rt_uint32_t spixfer(struct rt_spi_device *device, struct rt_spi_message *message)
+{
+    rt_err_t res;
+    RT_ASSERT(device != RT_NULL);
+    RT_ASSERT(device->bus != RT_NULL);
+    RT_ASSERT(device->bus->parent.user_data != RT_NULL);
+    struct stm32_spi *hspi = (struct stm32_spi *)device->bus->parent.user_data;
+    struct stm32_hw_spi_cs *cs = device->parent.user_data;
+
+    if (message->cs_take)
+    {
+        rt_pin_write(cs->pin, 0);
+    }
+    const rt_uint8_t *sndb = message->send_buf;
+    rt_uint8_t *rcvb = message->recv_buf;
+    rt_int32_t length = message->length;
+    while (length)
+    {
+        res = spitxrx1b(hspi, rcvb, sndb);
+        if (rcvb)
+        {
+            rcvb += SPISTEP(hspi->cfg->data_width);
+        }
+        if (sndb)
+        {
+            sndb += SPISTEP(hspi->cfg->data_width);
+        }
+        if (res != RT_EOK)
+        {
+            break;
+        }
+        length--;
+    }
+    /* Wait until Busy flag is reset before disabling SPI */
+    while (__HAL_SPI_GET_FLAG(hspi, SPI_FLAG_BSY) == SET)
+        ;
+    if (message->cs_release)
+    {
+        rt_pin_write(cs->pin, 1);
+    }
+    return message->length - length;
+}
+
+
+rt_err_t spi_configure(struct rt_spi_device *device,
+                       struct rt_spi_configuration *configuration)
+{
+    struct stm32_spi *hspi = (struct stm32_spi *)device->bus->parent.user_data;
+    hspi->cfg = configuration;
+    return stm32_spi_init(hspi->Instance, configuration);
+}
+
+const struct rt_spi_ops stm_spi_ops =
+{
+    .configure = spi_configure,
+    .xfer = spixfer,
+};
+
+struct rt_spi_bus _spi_bus1, _spi_bus2;
+struct stm32_spi _spi1, _spi2;
+int stm32_spi_register_bus(SPI_TypeDef *SPIx, const char *name)
+{
+    struct rt_spi_bus *spi_bus;
+    struct stm32_spi *spi;
+    if (SPIx == SPI1)
+    {
+        spi_bus = &_spi_bus1;
+        spi = &_spi1;
+    }
+    else if (SPIx == SPI2)
+    {
+        spi_bus = &_spi_bus2;
+        spi = &_spi2;
+    }
+    else
+    {
+        return -1;
+    }
+    spi->Instance = SPIx;
+    spi_bus->parent.user_data = spi;
+    return rt_spi_bus_register(spi_bus, name, &stm_spi_ops);
+}
+
+rt_err_t stm32_spi_bus_attach_device(rt_uint32_t pin, const char *bus_name, const char *device_name)
+{
+    struct rt_spi_device *spi_device = (struct rt_spi_device *)rt_malloc(sizeof(struct rt_spi_device));
+    RT_ASSERT(spi_device != RT_NULL);
+    struct stm32_hw_spi_cs *cs_pin = (struct stm32_hw_spi_cs *)rt_malloc(sizeof(struct stm32_hw_spi_cs));
+    RT_ASSERT(cs_pin != RT_NULL);
+    cs_pin->pin = pin;
+    rt_pin_mode(pin, PIN_MODE_OUTPUT);
+    rt_pin_write(pin, 1);
+    return rt_spi_bus_attach_device(spi_device, device_name, bus_name, (void *)cs_pin);
+}
+
+int stm32_hw_spi_init(void)
+{
+    int result = 0;
+#ifdef RT_USING_SPI1
+    result = stm32_spi_register_bus(SPI1, "spi1");
+#endif
+#ifdef RT_USING_SPI2
+    result = stm32_spi_register_bus(SPI2, "spi2");
+#endif
+    return result;
+}
+INIT_BOARD_EXPORT(stm32_hw_spi_init);
+
+void HAL_SPI_MspInit(SPI_HandleTypeDef *spiHandle)
+{
+
+    GPIO_InitTypeDef GPIO_InitStruct;
+    if (spiHandle->Instance == SPI1)
+    {
+        /* SPI1 clock enable */
+        __HAL_RCC_SPI1_CLK_ENABLE();
+        __HAL_RCC_GPIOA_CLK_ENABLE();
+        /**SPI1 GPIO Configuration
+        PA5     ------> SPI1_SCK
+        PA6     ------> SPI1_MISO
+        PA7     ------> SPI1_MOSI
+        */
+        GPIO_InitStruct.Pin = GPIO_PIN_5 | GPIO_PIN_7;
+        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+        HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+        GPIO_InitStruct.Pin = GPIO_PIN_6;
+        GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+        GPIO_InitStruct.Pull = GPIO_NOPULL;
+        HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    }
+    else if (spiHandle->Instance == SPI2)
+    {
+        /* SPI2 clock enable */
+        __HAL_RCC_SPI2_CLK_ENABLE();
+        __HAL_RCC_GPIOB_CLK_ENABLE();
+        /**SPI2 GPIO Configuration
+        PB13     ------> SPI2_SCK
+        PB14     ------> SPI2_MISO
+        PB15     ------> SPI2_MOSI
+        */
+        GPIO_InitStruct.Pin = GPIO_PIN_13 | GPIO_PIN_15;
+        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+        HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+        GPIO_InitStruct.Pin = GPIO_PIN_14;
+        GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+        GPIO_InitStruct.Pull = GPIO_NOPULL;
+        HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    }
+}
+
+void HAL_SPI_MspDeInit(SPI_HandleTypeDef *spiHandle)
+{
+
+    if (spiHandle->Instance == SPI1)
+    {
+        /* Peripheral clock disable */
+        __HAL_RCC_SPI1_CLK_DISABLE();
+
+        /**SPI1 GPIO Configuration
+        PA5     ------> SPI1_SCK
+        PA6     ------> SPI1_MISO
+        PA7     ------> SPI1_MOSI
+        */
+        HAL_GPIO_DeInit(GPIOA, GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7);
+    }
+    else if (spiHandle->Instance == SPI2)
+    {
+        /* Peripheral clock disable */
+        __HAL_RCC_SPI2_CLK_DISABLE();
+
+        /**SPI2 GPIO Configuration
+        PB13     ------> SPI2_SCK
+        PB14     ------> SPI2_MISO
+        PB15     ------> SPI2_MOSI
+        */
+        HAL_GPIO_DeInit(GPIOB, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15);
+    }
+}
+#endif /*RT_USING_SPI*/ 

@@ -4,17 +4,15 @@
 #include "stm32f1xx.h"
 #include "drv_usart.h"
 
-/* 注意f1在使用重映射时，需要调用重映射函数，但是串口1的重映射函数和
-__HAL_AFIO_REMAP_SWJ_NOJTAG有冲突，同时打开无法下载和调试 */
 #ifdef  RT_USING_UART1
 #define USART1_CLK_ENABLE()              __HAL_RCC_USART1_CLK_ENABLE()
-#define USART1_RX_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOB_CLK_ENABLE()
-#define USART1_TX_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOB_CLK_ENABLE()
+#define USART1_RX_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOA_CLK_ENABLE()
+#define USART1_TX_GPIO_CLK_ENABLE()      __HAL_RCC_GPIOA_CLK_ENABLE()
 
-#define USART1_TX_PIN                    GPIO_PIN_6
-#define USART1_TX_GPIO_PORT              GPIOB
-#define USART1_RX_PIN                    GPIO_PIN_7
-#define USART1_RX_GPIO_PORT              GPIOB
+#define USART1_TX_PIN                    GPIO_PIN_9
+#define USART1_TX_GPIO_PORT              GPIOA
+#define USART1_RX_PIN                    GPIO_PIN_10
+#define USART1_RX_GPIO_PORT              GPIOA
 #endif
 
 #ifdef  RT_USING_UART2
@@ -76,9 +74,9 @@ static rt_err_t stm32_configure(struct rt_serial_device *serial, struct serial_c
 
   uart = (struct stm32_uart *)serial->parent.user_data;
 
-  uart->UartHandle.Init.BaudRate   = cfg->baud_rate;
-  uart->UartHandle.Init.HwFlowCtl  = UART_HWCONTROL_NONE;
-  uart->UartHandle.Init.Mode       = UART_MODE_TX_RX;
+  uart->UartHandle.Init.BaudRate     = cfg->baud_rate;
+  uart->UartHandle.Init.HwFlowCtl    = UART_HWCONTROL_NONE;
+  uart->UartHandle.Init.Mode         = UART_MODE_TX_RX;
   uart->UartHandle.Init.OverSampling = UART_OVERSAMPLING_16;
 
   switch (cfg->data_bits)
@@ -141,20 +139,20 @@ static rt_err_t stm32_control(struct rt_serial_device *serial, int cmd, void *ar
   RT_ASSERT(serial != RT_NULL);
   uart = (struct stm32_uart *)serial->parent.user_data;
 
-  switch (cmd)
+  switch(cmd)
   {
-  case RT_DEVICE_CTRL_CLR_INT:
-      /* disable rx irq */
-      UART_DISABLE_IRQ(uart->irq);
-      /* disable interrupt */
-      __HAL_UART_DISABLE_IT(&uart->UartHandle, UART_IT_RXNE);
-      break;
-  case RT_DEVICE_CTRL_SET_INT:
-      /* enable rx irq */
-      UART_ENABLE_IRQ(uart->irq);
-      /* enable interrupt */
-      __HAL_UART_ENABLE_IT(&uart->UartHandle, UART_IT_RXNE);
-      break;
+      case RT_DEVICE_CTRL_CLR_INT:
+          /* disable rx irq */
+          UART_DISABLE_IRQ(uart->irq);
+          /* disable interrupt */
+          __HAL_UART_DISABLE_IT(&uart->UartHandle, UART_IT_RXNE);
+          break;
+      case RT_DEVICE_CTRL_SET_INT:
+          /* enable rx irq */
+          UART_ENABLE_IRQ(uart->irq);
+          /* enable interrupt */
+          __HAL_UART_ENABLE_IT(&uart->UartHandle, UART_IT_RXNE);
+          break;
   }
 
   return RT_EOK;
@@ -167,12 +165,8 @@ static int stm32_putc(struct rt_serial_device *serial, char c)
     RT_ASSERT(serial != RT_NULL);
     uart = (struct stm32_uart *)serial->parent.user_data;
 
-//    while((__HAL_UART_GET_FLAG(&uart->UartHandle, UART_FLAG_TXE) == RESET));
-//    {
-//        uart->UartHandle.Instance->DR = c;
-//    }
+    while((__HAL_UART_GET_FLAG(&uart->UartHandle, UART_FLAG_TXE) == RESET));
     
-    while (!(uart->UartHandle.Instance->SR & UART_FLAG_TC));
     uart->UartHandle.Instance->DR = c;
     
     return 1;
@@ -187,8 +181,6 @@ static int stm32_getc(struct rt_serial_device *serial)
     uart = (struct stm32_uart *)serial->parent.user_data;
 
     ch = -1;
-//    if (__HAL_UART_GET_FLAG(&uart->UartHandle, UART_FLAG_RXNE) != RESET)
-//        ch = uart->UartHandle.Instance->DR & 0xff;
     
     if(uart->UartHandle.Instance->SR & UART_FLAG_RXNE)
     {
@@ -211,7 +203,6 @@ static void uart_isr(struct rt_serial_device *serial)
         rt_hw_serial_isr(serial, RT_SERIAL_EVENT_RX_IND);
         /* Clear RXNE interrupt flag */
         __HAL_UART_CLEAR_FLAG(&uart->UartHandle, UART_FLAG_RXNE);
-        //__HAL_UART_SEND_REQ(&uart->UartHandle, UART_RXDATA_FLUSH_REQUEST);
     }
 }
 
@@ -222,8 +213,6 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 #if defined(RT_USING_UART1)
     if(huart->Instance == USART1)
     {
-		__HAL_AFIO_REMAP_USART1_ENABLE();
-		
         /*##-1- Enable peripherals and GPIO Clocks ###########################*/
         /* Enable GPIO TX/RX clock */
         USART1_TX_GPIO_CLK_ENABLE();
@@ -246,8 +235,8 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
         GPIO_InitStruct.Pin 	  = USART1_RX_PIN;
         
         HAL_GPIO_Init(USART1_RX_GPIO_PORT, &GPIO_InitStruct);
-		
-        HAL_NVIC_SetPriority(USART1_IRQn, 9, 0);
+        
+        HAL_NVIC_SetPriority(USART1_IRQn, 15, 0);
         HAL_NVIC_EnableIRQ(USART1_IRQn);
     }
 #endif
@@ -281,7 +270,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
         HAL_NVIC_SetPriority(USART2_IRQn, 15, 0);
         HAL_NVIC_EnableIRQ(USART2_IRQn);
     }
-#endif		
+#endif
     
 #if defined(RT_USING_UART3)
     if(huart->Instance == USART3)
@@ -371,7 +360,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
         
         HAL_GPIO_Init(UART5_RX_GPIO_PORT, &GPIO_InitStruct);
         
-        HAL_NVIC_SetPriority(UART5_IRQn, 15, 0);
+        HAL_NVIC_SetPriority(UART5_IRQn, 8, 0);
         HAL_NVIC_EnableIRQ(UART5_IRQn);
     }
 #endif
@@ -411,7 +400,7 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef *huart)
 
         HAL_NVIC_DisableIRQ(USART2_IRQn);
     }
-#endif	
+#endif
     
 #if defined(RT_USING_UART3)
     if (huart->Instance == USART3)
@@ -576,8 +565,6 @@ int stm32_hw_usart_init(void)
     serial1.ops    = &stm32_uart_ops;
     serial1.config = config;
     
-    // serial1.config.baud_rate = BAUD_RATE_9600;
-    
     /* register UART1 device */
     rt_hw_serial_register(&serial1,
         "uart1",
@@ -597,7 +584,7 @@ int stm32_hw_usart_init(void)
         "uart2",
         RT_DEVICE_FLAG_RDWR | RT_DEVICE_FLAG_INT_RX,
         uart);
-#endif /* RT_USING_UART2 */
+#endif /* RT_USING_UART2 */	
     
 #ifdef RT_USING_UART3
     uart = &uart3;

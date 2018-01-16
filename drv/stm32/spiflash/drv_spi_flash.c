@@ -1,92 +1,56 @@
 /*
- * File      : drv_spi_flash.c
- * This file is part of RT-Thread RTOS
- * COPYRIGHT (C) 2009 RT-Thread Develop Team
+ * @File:   drv_spi_flash.c 
+ * @Author: liu2guang 
+ * @Date:   2018-01-11 16:10:56 
+ * 
+ * @LICENSE: MIT License Copyright (c) 2017 liu2guang
  *
- * The license and distribution terms for this file may be
- * found in the file LICENSE in this distribution or at
- * http://www.rt-thread.org/license/LICENSE
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  *
- * Change Logs:
- * Date           Author       Notes
- * 2012-01-01     aozima       first implementation.
- * 2012-07-27     aozima       fixed variable uninitialized.
- * 2017-08-19     liuguang     for stm32f103 + w25q64fv.
- */
-#include <board.h>
-#include "drv_spi.h"
+ * Change Logs: 
+ * Date           Author       Notes 
+ * 2018-01-11     liu2guang    第一版本. 
+ */ 
+#include "drv_spi.h" 
+#include "drv_spi_flash.h"
+
+#include "rtthread.h" 
+#include "rtdevice.h" 
 #include "spi_flash.h"
 #include "spi_flash_sfud.h"
 
-#include <rthw.h>
-#include <finsh.h>
-
-int rt_hw_spi1_init(void)
-{
-    /* register spi bus */
-    {
-        GPIO_InitTypeDef GPIO_InitStructure;
-		rt_err_t result;
-
-		__HAL_RCC_GPIOA_CLK_ENABLE();
-
-		GPIO_InitStructure.Pin = GPIO_PIN_5|GPIO_PIN_7;
-		GPIO_InitStructure.Mode = GPIO_MODE_AF_PP;
-		GPIO_InitStructure.Speed = GPIO_SPEED_FREQ_HIGH;
-		HAL_GPIO_Init(GPIOA, &GPIO_InitStructure);
-
-		GPIO_InitStructure.Pin = GPIO_PIN_6;
-		GPIO_InitStructure.Mode = GPIO_MODE_INPUT;
-		GPIO_InitStructure.Pull = GPIO_NOPULL;
-		HAL_GPIO_Init(GPIOA, &GPIO_InitStructure);
-
-		result = stm32_spi_bus_register(SPI1, "spi1");
-        if (result != RT_EOK)
-		{
-			return result;
-		}
-    }
-
-    /* attach cs */
-    {
-        static struct rt_spi_device spi_device;
-        static struct stm32_spi_cs  spi_cs;
-		rt_err_t result;
-
-        GPIO_InitTypeDef GPIO_InitStructure;
-		
-		__HAL_RCC_GPIOA_CLK_ENABLE();
-		
-		GPIO_InitStructure.Mode  = GPIO_MODE_OUTPUT_PP;
-		GPIO_InitStructure.Speed = GPIO_SPEED_FREQ_LOW;
-
-        spi_cs.GPIOx    = GPIOA;
-        spi_cs.GPIO_Pin = GPIO_PIN_4;
-
-        GPIO_InitStructure.Pin = spi_cs.GPIO_Pin;
-        HAL_GPIO_WritePin(spi_cs.GPIOx, spi_cs.GPIO_Pin, GPIO_PIN_SET);
-        HAL_GPIO_Init(spi_cs.GPIOx, &GPIO_InitStructure);
-
-        result = rt_spi_bus_attach_device(&spi_device, "spi10", "spi1", (void*)&spi_cs);
-		if (result != RT_EOK)
-		{
-			return result;
-		}
-    }
-
-	return RT_EOK;
-}
-
-/* 注意在msh下使用sf查看flash的保护 */
+/* SFUD模式SPI FLASH初始化 */
 int rt_hw_spi_flash_with_sfud_init(void)
-{	
-	rt_hw_spi1_init();
-	
-    if(RT_NULL == rt_sfud_flash_probe("flash0", "spi10"))
+{
+    rt_err_t result; 
+    
+    result = stm32_spi_bus_attach_device(RT_SPI_FLASH_CS_PIN, "spi1", "spi10"); 
+    if(result != RT_EOK) 
+    {
+        return result; 
+    }
+    
+    if(rt_sfud_flash_probe("flash0", "spi10") == RT_NULL) 
     {
         return RT_ERROR;
-    };
+    }
 
-	return RT_EOK;
+    return RT_EOK; 
 }
-INIT_DEVICE_EXPORT(rt_hw_spi_flash_with_sfud_init);
+INIT_DEVICE_EXPORT(rt_hw_spi_flash_with_sfud_init); 
