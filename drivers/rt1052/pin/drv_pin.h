@@ -1,5 +1,5 @@
 /*
- * File      : drv_pin.c
+ * File      : drv_pin.h
  * This file is part of RT-Thread RTOS
  * COPYRIGHT (C) 2006-2013, RT-Thread Development Team
  *
@@ -12,8 +12,8 @@
  * 2018-03-13     Liuguang     the first version. 
  */
  
-#ifndef __USART_H__
-#define __USART_H__
+#ifndef __DRV_PIN_H__
+#define __DRV_PIN_H__
 
 #include <rtthread.h> 
 #include <rtdevice.h> 
