@@ -15,6 +15,7 @@
 #include <time.h>
 #include "fsl_common.h" 
 #include "fsl_snvs_hp.h"
+#include "fsl_snvs_lp.h"
 
 #ifdef RT_USING_RTC
 
@@ -63,20 +64,11 @@ static int set_timestamp(time_t timestamp)
 /* Çý¶¯½Ó¿Ú */
 static rt_err_t rt1052_hp_rtc_init(rt_device_t dev)
 {
-    snvs_hp_rtc_datetime_t rtcDate;
     snvs_hp_rtc_config_t snvsRtcConfig;
     
     SNVS_HP_RTC_GetDefaultConfig(&snvsRtcConfig);
     SNVS_HP_RTC_Init(SNVS, &snvsRtcConfig);
     
-    rtcDate.year   = 2014U;
-    rtcDate.month  =   12U;
-    rtcDate.day    =   25U;
-    rtcDate.hour   =   19U;
-    rtcDate.minute =    0U;
-    rtcDate.second =    0U;
-    
-    SNVS_HP_RTC_SetDatetime(SNVS, &rtcDate);
     SNVS_HP_RTC_StartTimer(SNVS); 
     
     return RT_EOK; 
@@ -153,6 +145,6 @@ int rt_hw_hp_rtc_init(void)
     
     return RT_EOK; 
 }
-INIT_BOARD_EXPORT(rt_hw_hp_rtc_init); 
+INIT_DEVICE_EXPORT(rt_hw_hp_rtc_init); 
 
 #endif /*RT_USING_RTC */
