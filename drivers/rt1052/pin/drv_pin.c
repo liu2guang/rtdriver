@@ -10,7 +10,7 @@
  * Change Logs:
  * Date           Author       Notes
  * 2018-03-13     Liuguang     the first version.
- * 2018-03-15     Liuguang     add GPIO interrupt mode support.
+ * 2018-03-19     Liuguang     add GPIO interrupt mode support.
  */
 #include "drv_pin.h" 
 
@@ -43,6 +43,8 @@ struct rt1052_irq
 #define __ARRAY_LEN(array) (sizeof(array)/sizeof(array[0])) 
 #define __RT1052_PIN_DEFAULT {0, 0, 0} 
 #define __RT1052_PIN(INDEX, PORT, PIN) {INDEX, PORT, PIN} 
+
+static struct rt_pin_ops rt1052_pin_ops; 
 
 static struct rt1052_pin rt1052_pin_map[] = 
 {
@@ -477,14 +479,16 @@ static void rt1052_pin_mode(rt_device_t dev, rt_base_t pin, rt_base_t mode)
     {
         CLOCK_EnableClock(kCLOCK_Iomuxc); 
         
+        /* ≈‰÷√IOMUXC: Ω´IO≈‰÷√Œ™GPIO */ 
+        IOMUXC_SetPinMux(0x401F8010U + pin*4, 0x5U, 0, 0, 0, 0); 
     }
     else
     {
         CLOCK_EnableClock(kCLOCK_IomuxcSnvs); 
+        
+        /* ≈‰÷√IOMUXC: Ω´IO≈‰÷√Œ™GPIO */ 
+        IOMUXC_SetPinMux(0x401F8000U + (pin-125)*4, 0x5U, 0, 0, 0, 0); 
     }
-    
-    /* ≈‰÷√IOMUXC: Ω´IO≈‰÷√Œ™GPIO */ 
-    IOMUXC_SetPinMux(0x401F8010U + pin*4, 0x5U, 0, 0, 0, 0); 
     
     gpio.outputLogic = 0; 
     gpio.interruptMode = kGPIO_NoIntmode; 
@@ -631,19 +635,20 @@ static rt_err_t rt1052_pin_irq_enable(struct rt_device *device, rt_base_t pin, r
         
         irq_map->enable = PIN_IRQ_ENABLE; 
         
-        /* ø™∆Ù ±÷” */
         if(rt1052_pin_map[pin].gpio != GPIO5)
         {
             CLOCK_EnableClock(kCLOCK_Iomuxc); 
             
+            /* ≈‰÷√IOMUXC: Ω´IO≈‰÷√Œ™GPIO */ 
+            IOMUXC_SetPinMux(0x401F8010U + pin*4, 0x5U, 0, 0, 0, 0); 
         }
         else
         {
             CLOCK_EnableClock(kCLOCK_IomuxcSnvs); 
+            
+            /* ≈‰÷√IOMUXC: Ω´IO≈‰÷√Œ™GPIO */ 
+            IOMUXC_SetPinMux(0x401F8000U + (pin-125)*4, 0x5U, 0, 0, 0, 0); 
         }
-        
-        /* ≈‰÷√IOMUXC: Ω´IO≈‰÷√Œ™GPIO */ 
-        IOMUXC_SetPinMux(0x401F8010U + pin*4, 0x5U, 0, 0, 0, 0); 
         
         gpio.direction     = kGPIO_DigitalInput; 
         gpio.outputLogic   = 0; 
@@ -665,6 +670,19 @@ static rt_err_t rt1052_pin_irq_enable(struct rt_device *device, rt_base_t pin, r
             case PIN_IRQ_MODE_RISING_FALLING:
             {
                 gpio.interruptMode = kGPIO_IntRisingOrFallingEdge; 
+            }
+            break;
+            
+            /* ¥˝≤‚ ‘ */
+            case PIN_IRQ_MODE_HIGH_LEVEL:
+            {
+                gpio.interruptMode = kGPIO_IntHighLevel; 
+            }
+            break;
+            
+            case PIN_IRQ_MODE_LOW_LEVEL:
+            {
+                gpio.interruptMode = kGPIO_IntLowLevel; 
             }
             break;
         }
@@ -700,19 +718,16 @@ static rt_err_t rt1052_pin_irq_enable(struct rt_device *device, rt_base_t pin, r
     return RT_EOK;
 }
 
-static struct rt_pin_ops rt1052_pin_ops = 
-{
-    .pin_mode        = rt1052_pin_mode, 
-    .pin_read        = rt1052_pin_read, 
-    .pin_write       = rt1052_pin_write,
-    .pin_attach_irq  = rt1052_pin_attach_irq,
-    .pin_dettach_irq = rt1052_pin_dettach_irq,
-    .pin_irq_enable  = rt1052_pin_irq_enable
-}; 
-
 int rt_hw_pin_init(void)
 {
     int ret = RT_EOK; 
+    
+    rt1052_pin_ops.pin_mode        = rt1052_pin_mode; 
+    rt1052_pin_ops.pin_read        = rt1052_pin_read; 
+    rt1052_pin_ops.pin_write       = rt1052_pin_write; 
+    rt1052_pin_ops.pin_attach_irq  = rt1052_pin_attach_irq; 
+    rt1052_pin_ops.pin_dettach_irq = rt1052_pin_dettach_irq;
+    rt1052_pin_ops.pin_irq_enable  = rt1052_pin_irq_enable; 
     
     ret = rt_device_pin_register("pin", &rt1052_pin_ops, RT_NULL);
     

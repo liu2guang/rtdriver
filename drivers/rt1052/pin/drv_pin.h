@@ -10,6 +10,7 @@
  * Change Logs:
  * Date           Author       Notes
  * 2018-03-13     Liuguang     the first version. 
+ * 2018-03-19     Liuguang     add GPIO interrupt mode support.
  */
  
 #ifndef __DRV_PIN_H__
@@ -17,6 +18,8 @@
 
 #include <rtthread.h> 
 #include <rtdevice.h> 
+
+/* 定义别名 */
 
 int rt_hw_pin_init(void);
 
