@@ -19,8 +19,6 @@
 #include <rtthread.h> 
 #include <rtdevice.h> 
 
-/* 定义别名 */
-
 int rt_hw_pin_init(void);
 
 #endif
