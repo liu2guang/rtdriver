@@ -1,5 +1,5 @@
 /*
- * File      : dev_spi_ss1306.c
+ * File      : dev_spi_ssd1306.c
  * This file is part of RT-Thread RTOS
  * COPYRIGHT (C) 2015, RT-Thread Development Team
  *
@@ -12,7 +12,7 @@
  * 2018-04-17     liu2guang         the first version
  */
 
-#include "drv_spi_ss1306.h"
+#include "drv_spi_ssd1306.h"
 #include "drv_spi.h"
 
 /* Name               pin
@@ -22,12 +22,12 @@
  * DC        DC  PB1  19
  * RES       RST PB0  18  */
 
-#define SS1306_CS_PIN  14
-#define SS1306_DC_PIN  19
-#define SS1306_RST_PIN 18
+#define SSD1306_CS_PIN  14
+#define SSD1306_DC_PIN  19
+#define SSD1306_RST_PIN 18
 
-#define SS1306_WIDTH  128
-#define SS1306_HEIGHT 64
+#define SSD1306_WIDTH  128
+#define SSD1306_HEIGHT 64
 
 const unsigned char F6x8[][6] =
 {
@@ -261,34 +261,34 @@ const unsigned char  Hzk[][32] =
     {0x10, 0x30, 0x10, 0x1F, 0x08, 0x88, 0x48, 0x30, 0x0E, 0x01, 0x40, 0x80, 0x40, 0x3F, 0x00, 0x00}, /*"功",15*/
 };
 
-struct rt_spi_device *ss1306_device = RT_NULL;
+struct rt_spi_device *ssd1306_device = RT_NULL;
 
-static void ss1306_write_dat(uint8_t dat)
+static void ssd1306_write_dat(uint8_t dat)
 {
-    rt_pin_write(SS1306_DC_PIN, PIN_HIGH);
+    rt_pin_write(SSD1306_DC_PIN, PIN_HIGH);
 
-    rt_spi_send(ss1306_device, &dat, 1);
+    rt_spi_send(ssd1306_device, &dat, 1);
 
-    rt_pin_write(SS1306_DC_PIN, PIN_HIGH);
+    rt_pin_write(SSD1306_DC_PIN, PIN_HIGH);
 }
 
-static void ss1306_write_cmd(uint8_t cmd)
+static void ssd1306_write_cmd(uint8_t cmd)
 {
-    rt_pin_write(SS1306_DC_PIN, PIN_LOW);
+    rt_pin_write(SSD1306_DC_PIN, PIN_LOW);
 
-    rt_spi_send(ss1306_device, &cmd, 1);
+    rt_spi_send(ssd1306_device, &cmd, 1);
 
-    rt_pin_write(SS1306_DC_PIN, PIN_HIGH);
+    rt_pin_write(SSD1306_DC_PIN, PIN_HIGH);
 }
 
-static rt_err_t ss1306_init(void)
+static rt_err_t ssd1306_init(void)
 {
     /* 初始化GPIO */
-    rt_pin_write(SS1306_DC_PIN, PIN_HIGH);
-    rt_pin_mode(SS1306_DC_PIN, PIN_MODE_OUTPUT);
+    rt_pin_write(SSD1306_DC_PIN, PIN_HIGH);
+    rt_pin_mode(SSD1306_DC_PIN, PIN_MODE_OUTPUT);
 
-    rt_pin_write(SS1306_RST_PIN, PIN_HIGH);
-    rt_pin_mode(SS1306_RST_PIN, PIN_MODE_OUTPUT);
+    rt_pin_write(SSD1306_RST_PIN, PIN_HIGH);
+    rt_pin_mode(SSD1306_RST_PIN, PIN_MODE_OUTPUT);
 
     /* config spi */
     {
@@ -298,176 +298,176 @@ static rt_err_t ss1306_init(void)
         cfg.max_hz     = 500 * 1000;
         cfg.mode       = RT_SPI_MODE_0 | RT_SPI_MSB;
 
-        rt_spi_configure(ss1306_device, &cfg);
+        rt_spi_configure(ssd1306_device, &cfg);
     }
 
     /* 复位OLED */
-    rt_pin_write(SS1306_RST_PIN, PIN_HIGH);
+    rt_pin_write(SSD1306_RST_PIN, PIN_HIGH);
     rt_thread_delay(RT_TICK_PER_SECOND / 10);
-    rt_pin_write(SS1306_RST_PIN, PIN_LOW);
+    rt_pin_write(SSD1306_RST_PIN, PIN_LOW);
     rt_thread_delay(RT_TICK_PER_SECOND / 5);
-    rt_pin_write(SS1306_RST_PIN, PIN_HIGH);
+    rt_pin_write(SSD1306_RST_PIN, PIN_HIGH);
     rt_thread_delay(RT_TICK_PER_SECOND / 5);
 
     /* OLED配置 */
-    ss1306_write_cmd(0xAE); /* 关闭显示 */
-    ss1306_write_cmd(0x2E); /* 关闭滚动 */
+    ssd1306_write_cmd(0xAE); /* 关闭显示 */
+    ssd1306_write_cmd(0x2E); /* 关闭滚动 */
 
-    ss1306_write_cmd(0x00); /* 设置低列地址 */
-    ss1306_write_cmd(0x10); /* 设置高列地址 */
-    ss1306_write_cmd(0x40); /* 设置起始行地址 */
-    ss1306_write_cmd(0xB0); /* 设置页地址 */
+    ssd1306_write_cmd(0x00); /* 设置低列地址 */
+    ssd1306_write_cmd(0x10); /* 设置高列地址 */
+    ssd1306_write_cmd(0x40); /* 设置起始行地址 */
+    ssd1306_write_cmd(0xB0); /* 设置页地址 */
 
-    ss1306_write_cmd(0x81); /* 对比度设置，可设置亮度 */
-    ss1306_write_cmd(0xFF); /* 265 */
+    ssd1306_write_cmd(0x81); /* 对比度设置，可设置亮度 */
+    ssd1306_write_cmd(0xFF); /* 265 */
 
-    ss1306_write_cmd(0xA1); /* 设置段(SEG)的起始映射地址；column的127地址是SEG0的地址 */
-    ss1306_write_cmd(0xA6); /* 正常显示；0xa7逆显示 */
+    ssd1306_write_cmd(0xA1); /* 设置段(SEG)的起始映射地址；column的127地址是SEG0的地址 */
+    ssd1306_write_cmd(0xA6); /* 正常显示；0xa7逆显示 */
 
-    ss1306_write_cmd(0xA8); /* 设置驱动路数 */
-    ss1306_write_cmd(0x3F); /* 1/64duty */
+    ssd1306_write_cmd(0xA8); /* 设置驱动路数 */
+    ssd1306_write_cmd(0x3F); /* 1/64duty */
 
-    ss1306_write_cmd(0xC8); /* 重映射模式，COM[N-1]~COM0扫描 */
+    ssd1306_write_cmd(0xC8); /* 重映射模式，COM[N-1]~COM0扫描 */
 
-    ss1306_write_cmd(0xD3); /* 设置显示偏移 */
-    ss1306_write_cmd(0x00); /* 无偏移 */
+    ssd1306_write_cmd(0xD3); /* 设置显示偏移 */
+    ssd1306_write_cmd(0x00); /* 无偏移 */
 
-    ss1306_write_cmd(0xD5); /* 设置震荡器分频(默认) */
-    ss1306_write_cmd(0x80); /*  */
+    ssd1306_write_cmd(0xD5); /* 设置震荡器分频(默认) */
+    ssd1306_write_cmd(0x80); /*  */
 
-    ss1306_write_cmd(0xD8); /* 设置 area color mode off(没有) */
-    ss1306_write_cmd(0x05); /*  */
+    ssd1306_write_cmd(0xD8); /* 设置 area color mode off(没有) */
+    ssd1306_write_cmd(0x05); /*  */
 
-    ss1306_write_cmd(0xD6); /* 放大显示 */
-    ss1306_write_cmd(0x00); /*  */
+    ssd1306_write_cmd(0xD6); /* 放大显示 */
+    ssd1306_write_cmd(0x00); /*  */
 
-    ss1306_write_cmd(0xD9); /* 设置 Pre-Charge Period(默认) */
-    ss1306_write_cmd(0xF1); /*  */
+    ssd1306_write_cmd(0xD9); /* 设置 Pre-Charge Period(默认) */
+    ssd1306_write_cmd(0xF1); /*  */
 
-    ss1306_write_cmd(0xDA); /* 设置 com pin configuartion(默认) */
-    ss1306_write_cmd(0x12); /*  */
+    ssd1306_write_cmd(0xDA); /* 设置 com pin configuartion(默认) */
+    ssd1306_write_cmd(0x12); /*  */
 
-    ss1306_write_cmd(0xDB); /* 设置 Vcomh，可调节亮度(默认) */
-    ss1306_write_cmd(0x30); /*  */
+    ssd1306_write_cmd(0xDB); /* 设置 Vcomh，可调节亮度(默认) */
+    ssd1306_write_cmd(0x30); /*  */
 
-    ss1306_write_cmd(0x8D); /* 设置OLED电荷泵 */
-    ss1306_write_cmd(0x14); /* 开显示 */
+    ssd1306_write_cmd(0x8D); /* 设置OLED电荷泵 */
+    ssd1306_write_cmd(0x14); /* 开显示 */
 
-    ss1306_write_cmd(0xA4); /* Disable Entire Display On(0xa4/0xa5) */
-    ss1306_write_cmd(0xA6); /* Disable Inverse Display On(0xa6/a7) */
+    ssd1306_write_cmd(0xA4); /* Disable Entire Display On(0xa4/0xa5) */
+    ssd1306_write_cmd(0xA6); /* Disable Inverse Display On(0xa6/a7) */
 
-    ss1306_write_cmd(0xAF); /* 开启OLED面板显示 */
+    ssd1306_write_cmd(0xAF); /* 开启OLED面板显示 */
 
-    ss1306_clear();
-    ss1306_set_pos(0, 0);
+    ssd1306_clear();
+    ssd1306_set_pos(0, 0);
 
     return RT_EOK;
 }
 
-void ss1306_disp_on(void)
+void ssd1306_disp_on(void)
 {
-    ss1306_write_cmd(0X8D); /* 设置OLED电荷泵 */
-    ss1306_write_cmd(0X14); /* 使能, 开 */
-    ss1306_write_cmd(0XAF); /* 开显示 */
+    ssd1306_write_cmd(0X8D); /* 设置OLED电荷泵 */
+    ssd1306_write_cmd(0X14); /* 使能, 开 */
+    ssd1306_write_cmd(0XAF); /* 开显示 */
 }
 
-void ss1306_disp_off(void)
+void ssd1306_disp_off(void)
 {
-    ss1306_write_cmd(0XAE); /* 关显示 */
-    ss1306_write_cmd(0X8D); /* 设置OLED电荷泵 */
-    ss1306_write_cmd(0X10); /* 失能, 关 */
+    ssd1306_write_cmd(0XAE); /* 关显示 */
+    ssd1306_write_cmd(0X8D); /* 设置OLED电荷泵 */
+    ssd1306_write_cmd(0X10); /* 失能, 关 */
 }
 
-void ss1306_set_pos(uint8_t x, uint8_t y)
+void ssd1306_set_pos(uint8_t x, uint8_t y)
 {
-    ss1306_write_cmd(0xb0 + y);           /* 写入页地址 */
-    ss1306_write_cmd(x & 0x0f);           /* 写入列的地址 低半字节 */
-    ss1306_write_cmd(((x & 0xf0) >> 4) | 0x10); /* 写入列的地址 高半字节 */
+    ssd1306_write_cmd(0xb0 + y);           /* 写入页地址 */
+    ssd1306_write_cmd(x & 0x0f);           /* 写入列的地址 低半字节 */
+    ssd1306_write_cmd(((x & 0xf0) >> 4) | 0x10); /* 写入列的地址 高半字节 */
 }
 
-void ss1306_clear(void)
+void ssd1306_clear(void)
 {
     uint8_t x, y;
 
     for (y = 0; y < 8; y++)
     {
-        ss1306_write_cmd(0xb0 + y); /* 从0~7页依次写入 */
-        ss1306_write_cmd(0x00);   /* 列低地址 */
-        ss1306_write_cmd(0x10);   /* 列高地址 */
+        ssd1306_write_cmd(0xb0 + y); /* 从0~7页依次写入 */
+        ssd1306_write_cmd(0x00);   /* 列低地址 */
+        ssd1306_write_cmd(0x10);   /* 列高地址 */
 
         for (x = 0; x < 128; x++)
         {
-            ss1306_write_dat(0x00);
+            ssd1306_write_dat(0x00);
         }
     }
 }
 
-void ss1306_scroll(void)
+void ssd1306_scroll(void)
 {
-    ss1306_write_cmd(0x2E);   // 关闭滚动
-    ss1306_write_cmd(0x27);   // 水平向左滚动
-    ss1306_write_cmd(0x00);   // 虚拟字节
-    ss1306_write_cmd(0x00);   // 起始页 0
-    ss1306_write_cmd(0x00);   // 滚动时间间隔
-    ss1306_write_cmd(0x01);   // 终止页 1
-    ss1306_write_cmd(0x00);   // 虚拟字节
-    ss1306_write_cmd(0xFF);   // 虚拟字节
-    ss1306_write_cmd(0x2F);   // 开启滚动
+    ssd1306_write_cmd(0x2E);   // 关闭滚动
+    ssd1306_write_cmd(0x27);   // 水平向左滚动
+    ssd1306_write_cmd(0x00);   // 虚拟字节
+    ssd1306_write_cmd(0x00);   // 起始页 0
+    ssd1306_write_cmd(0x00);   // 滚动时间间隔
+    ssd1306_write_cmd(0x01);   // 终止页 1
+    ssd1306_write_cmd(0x00);   // 虚拟字节
+    ssd1306_write_cmd(0xFF);   // 虚拟字节
+    ssd1306_write_cmd(0x2F);   // 开启滚动
 }
 
-void ss1306_show_ch06x08(uint8_t x, uint8_t y, uint8_t ch)
+void ssd1306_show_ch06x08(uint8_t x, uint8_t y, uint8_t ch)
 {
     uint8_t index = 0;
     uint8_t map_offset = 0;
 
     map_offset = ch - ' ';
 
-    if (x < (SS1306_WIDTH - 1))
+    if (x < (SSD1306_WIDTH - 1))
     {
         x = 0;
         y = y + 2;
     }
 
-    ss1306_set_pos(x, y + 1);
+    ssd1306_set_pos(x, y + 1);
     for (index = 0; index < 6; index++)
     {
-        ss1306_write_dat(F6x8[map_offset][index]);
+        ssd1306_write_dat(F6x8[map_offset][index]);
     }
 }
 
-void ss1306_show_ch08x16(uint8_t x, uint8_t y, uint8_t ch)
+void ssd1306_show_ch08x16(uint8_t x, uint8_t y, uint8_t ch)
 {
     uint8_t index = 0;
     uint8_t map_offset = 0;
 
     map_offset = ch - ' ';
 
-    if (x > (SS1306_WIDTH - 1))
+    if (x > (SSD1306_WIDTH - 1))
     {
         x = 0;
         y = y + 2;
     }
 
-    ss1306_set_pos(x, y);
+    ssd1306_set_pos(x, y);
     for (index = 0; index < 8; index++)
     {
-        ss1306_write_dat(F8X16[map_offset * 16 + index]);
+        ssd1306_write_dat(F8X16[map_offset * 16 + index]);
     }
 
-    ss1306_set_pos(x, y + 1);
+    ssd1306_set_pos(x, y + 1);
     for (index = 0; index < 8; index++)
     {
-        ss1306_write_dat(F8X16[map_offset * 16 + index + 8]);
+        ssd1306_write_dat(F8X16[map_offset * 16 + index + 8]);
     }
 }
 
-void ss1306_show_string(uint8_t x, uint8_t y, uint8_t *string)
+void ssd1306_show_string(uint8_t x, uint8_t y, uint8_t *string)
 {
     unsigned char index = 0;
 
     while (string[index] != '\0')
     {
-        ss1306_show_ch08x16(x, y, string[index]);
+        ssd1306_show_ch08x16(x, y, string[index]);
 
         x += 8;
         if (x >= 128)
@@ -480,26 +480,26 @@ void ss1306_show_string(uint8_t x, uint8_t y, uint8_t *string)
     }
 }
 
-void ss1306_show_chinese(uint8_t x, uint8_t y, uint8_t no)
+void ssd1306_show_chinese(uint8_t x, uint8_t y, uint8_t no)
 {
     uint8_t index, adder = 0;
 
-    ss1306_set_pos(x, y);
+    ssd1306_set_pos(x, y);
     for (index = 0; index < 16; index++)
     {
-        ss1306_write_dat(Hzk[2 * no][index]);
+        ssd1306_write_dat(Hzk[2 * no][index]);
         adder += 1;
     }
 
-    ss1306_set_pos(x, y + 1);
+    ssd1306_set_pos(x, y + 1);
     for (index = 0; index < 16; index++)
     {
-        ss1306_write_dat(Hzk[2 * no + 1][index]);
+        ssd1306_write_dat(Hzk[2 * no + 1][index]);
         adder += 1;
     }
 }
 
-void ss1306_show_bmp(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, const uint8_t *data)
+void ssd1306_show_bmp(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, const uint8_t *data)
 {
     uint32_t j = 0;
     uint8_t x, y;
@@ -515,27 +515,27 @@ void ss1306_show_bmp(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, const uint8
 
     for(y = y0; y < y1; y++) 
     {
-        ss1306_set_pos(x0, y); 
+        ssd1306_set_pos(x0, y); 
         for (x = x0; x < x1; x++) 
         {
-            ss1306_write_dat(data[j++]); 
+            ssd1306_write_dat(data[j++]); 
         }
     }
 }
 
-int rt_hw_spi_ss1306_init(const char *spi_device_name, const char *spi_bus_name)
+int rt_hw_spi_ssd1306_init(const char *spi_device_name, const char *spi_bus_name)
 {
     rt_err_t ret = RT_EOK;
 
-    ret = stm32_spi_bus_attach_device(spi_bus_name, spi_device_name, SS1306_CS_PIN);
+    ret = stm32_spi_bus_attach_device(spi_bus_name, spi_device_name, SSD1306_CS_PIN);
     RT_ASSERT(ret == RT_EOK);
 
     /* find device */
-    ss1306_device = (struct rt_spi_device *)rt_device_find(spi_device_name);
-    RT_ASSERT(ss1306_device != RT_NULL);
+    ssd1306_device = (struct rt_spi_device *)rt_device_find(spi_device_name);
+    RT_ASSERT(ssd1306_device != RT_NULL);
 
-    ret = rt_device_open(&ss1306_device->parent, RT_DEVICE_OFLAG_RDWR);
+    ret = rt_device_open(&ssd1306_device->parent, RT_DEVICE_OFLAG_RDWR);
     RT_ASSERT(ret == RT_EOK);
 
-    return ss1306_init();
+    return ssd1306_init();
 }
